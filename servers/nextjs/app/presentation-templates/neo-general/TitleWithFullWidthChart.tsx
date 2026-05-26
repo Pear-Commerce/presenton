@@ -54,7 +54,7 @@ export const Schema = z.object({
     .string()
     .max(30)
     .describe("The main title of the slide")
-    .default("Spend & ROI Dashbo       ard"),
+    .default("Spend & ROI Dashboard"),
   chart: z
     .object({
       title: z.string().max(64).optional(),
@@ -141,7 +141,7 @@ const ChartLegend: React.FC<{
 
 const buildChartData = (
   categories: string[],
-  series: z.infer<typeof SeriesSchema>[]
+  series: z.infer<typeof SeriesSchema>[],
 ) =>
   categories.map((category, index) => {
     const entry: Record<string, string | number> = { name: category };
@@ -154,7 +154,7 @@ const buildChartData = (
 // Build simple data for single series charts
 const buildSimpleData = (
   categories: string[],
-  series: z.infer<typeof SeriesSchema>[]
+  series: z.infer<typeof SeriesSchema>[],
 ) => {
   if (series.length === 0) return [];
   return categories.map((name, index) => ({
@@ -519,12 +519,12 @@ const ChartRenderer: React.FC<{ chart: z.infer<typeof Schema>["chart"] }> = ({
       const divergingData = chart.divergingData
         ? transformDivergingData(chart.divergingData)
         : chart.series.length >= 2
-        ? chart.categories.map((name, index) => ({
-            name,
-            positive: chart.series[0].values[index] ?? 0,
-            negative: -(chart.series[1].values[index] ?? 0),
-          }))
-        : [];
+          ? chart.categories.map((name, index) => ({
+              name,
+              positive: chart.series[0].values[index] ?? 0,
+              negative: -(chart.series[1].values[index] ?? 0),
+            }))
+          : [];
       const labels = chart.divergingLabels || [
         chart.series[0]?.name || "Positive",
         chart.series[1]?.name || "Negative",
@@ -661,7 +661,7 @@ const ChartRenderer: React.FC<{ chart: z.infer<typeof Schema>["chart"] }> = ({
               name,
               value: chart.series.reduce(
                 (sum, s) => sum + (s.values[index] || 0),
-                0
+                0,
               ),
             }));
       return (
@@ -704,7 +704,7 @@ const ChartRenderer: React.FC<{ chart: z.infer<typeof Schema>["chart"] }> = ({
               name,
               value: chart.series.reduce(
                 (sum, s) => sum + (s.values[index] || 0),
-                0
+                0,
               ),
             }));
       return (

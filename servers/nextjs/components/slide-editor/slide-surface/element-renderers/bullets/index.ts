@@ -1,0 +1,1 @@
+export { BulletsDomElement } from "./BulletsDomElement";

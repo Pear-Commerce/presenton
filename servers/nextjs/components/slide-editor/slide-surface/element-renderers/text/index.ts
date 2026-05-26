@@ -1,0 +1,1 @@
+export { TextDomElement } from "./TextDomElement";

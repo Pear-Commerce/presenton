@@ -1,0 +1,1 @@
+export { SvgDomElement } from "./SvgDomElement";
