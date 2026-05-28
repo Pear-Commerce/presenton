@@ -5,6 +5,12 @@ import {
   prepareWithSegments,
 } from "@chenglou/pretext";
 import type { BulletsElement, TextElement } from "./slide-schema";
+import {
+  elementBox,
+  elementFont,
+  textContent,
+  textListStrings,
+} from "./element-model";
 
 // Reference DPI used across the editor (`PX_PER_IN` in editorUtils). Keep
 // in sync — if that changes, this should too.
@@ -60,6 +66,27 @@ export type TextLayoutSpec = FontFaceSpec & {
   w: number;
 };
 
+function textLayoutSpec(element: TextElement): TextLayoutSpec {
+  const box = elementBox(element);
+  const font = elementFont(element);
+  return {
+    text: textContent(element),
+    fontFace: font.family,
+    fontSize: font.size,
+    bold: font.bold,
+    italic: font.italic,
+    lineHeight: font.lineHeight,
+    charSpacing: font.letterSpacing,
+    w: box.w,
+  };
+}
+
+function normalizeTextSpec(spec: TextLayoutSpec | TextElement): TextLayoutSpec {
+  return "type" in spec && spec.type === "text"
+    ? textLayoutSpec(spec)
+    : (spec as TextLayoutSpec);
+}
+
 /**
  * Measures the rendered height of a text block in inches. Pure
  * arithmetic — no DOM reflow. Returns `null` if Pretext is unavailable
@@ -88,9 +115,10 @@ export function measureTextHeightInches(spec: TextLayoutSpec): number | null {
 const OVERFLOW_TOLERANCE_IN = 0.01;
 
 export function textElementOverflows(el: TextElement): boolean {
-  const measured = measureTextHeightInches(el);
+  const box = elementBox(el);
+  const measured = measureTextHeightInches(textLayoutSpec(el));
   if (measured == null) return false;
-  return measured > el.h + OVERFLOW_TOLERANCE_IN;
+  return measured > box.h + OVERFLOW_TOLERANCE_IN;
 }
 
 // Pretext samples canvas font metrics, the DOM uses CSS line boxes.
@@ -107,9 +135,10 @@ const FIT_SAFETY_GAP_IN = 0.04;
  * unavailable. Floor: 6pt (the schema minimum). Never grows the font.
  */
 export function fitFontToBox(
-  spec: TextLayoutSpec,
+  input: TextLayoutSpec | TextElement,
   heightInches: number,
 ): number {
+  const spec = normalizeTextSpec(input);
   if (typeof window === "undefined") return spec.fontSize;
   const target = Math.max(0.05, heightInches - FIT_SAFETY_GAP_IN);
   const measure = (size: number) =>
@@ -144,22 +173,25 @@ function measureBulletsHeightInches(
 ): number | null {
   // Roughly 1em reserved for the marker glyph + a touch of breathing
   // room. Mirrors `paddingLeft: "1.1em"` in BulletsDomElement.
+  const box = elementBox(el);
+  const font = elementFont(el);
+  const items = textListStrings(el);
   const bulletGutterIn = (fontSizePt * 0.9) / 72;
-  const innerWidth = Math.max(0.1, el.w - bulletGutterIn);
-  const gap = el.itemGap ?? 0.05;
+  const innerWidth = Math.max(0.1, box.w - bulletGutterIn);
+  const gap = 0.05;
   let total = 0;
-  for (let i = 0; i < el.items.length; i += 1) {
+  for (let i = 0; i < items.length; i += 1) {
     const h = measureTextHeightInches({
-      text: el.items[i],
-      fontFace: el.fontFace,
+      text: items[i],
+      fontFace: font.family,
       fontSize: fontSizePt,
-      lineHeight: el.lineSpacingMultiple,
-      charSpacing: null,
+      lineHeight: font.lineHeight,
+      charSpacing: font.letterSpacing,
       w: innerWidth,
     });
     if (h == null) return null;
     total += h;
-    if (i < el.items.length - 1) total += gap;
+    if (i < items.length - 1) total += gap;
   }
   return total;
 }
@@ -171,13 +203,15 @@ function measureBulletsHeightInches(
  * Pretext is unavailable. Never grows.
  */
 export function fitBulletsFontToBox(el: BulletsElement): number {
-  if (typeof window === "undefined") return el.fontSize;
-  const target = Math.max(0.05, el.h - FIT_SAFETY_GAP_IN);
-  const startH = measureBulletsHeightInches(el, el.fontSize);
-  if (startH == null || startH <= target) return el.fontSize;
+  const box = elementBox(el);
+  const font = elementFont(el);
+  if (typeof window === "undefined") return font.size;
+  const target = Math.max(0.05, box.h - FIT_SAFETY_GAP_IN);
+  const startH = measureBulletsHeightInches(el, font.size);
+  if (startH == null || startH <= target) return font.size;
 
   let lo = 6;
-  let hi = el.fontSize;
+  let hi = font.size;
   for (let i = 0; i < 8 && hi - lo > 0.5; i += 1) {
     const mid = (lo + hi) / 2;
     const h = measureBulletsHeightInches(el, mid);
@@ -198,20 +232,25 @@ export function fitBulletsFontToBox(el: BulletsElement): number {
  * Returns `[el.text]` (a single chunk) if Pretext can't run.
  */
 export function wrapTextElementLines(el: TextElement): string[] {
-  if (typeof window === "undefined") return [el.text];
-  const fontSizePx = el.fontSize * PT_TO_PX;
-  const lhMul = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
+  const spec = textLayoutSpec(el);
+  if (typeof window === "undefined") return [spec.text];
+  const fontSizePx = spec.fontSize * PT_TO_PX;
+  const lhMul = spec.lineHeight ?? DEFAULT_LINE_HEIGHT;
   const lineHeightPx = fontSizePx * lhMul;
-  const widthPx = el.w * PX_PER_INCH;
-  const letterSpacingPx = ((el.charSpacing ?? 0) / 100) * PT_TO_PX;
+  const widthPx = spec.w * PX_PER_INCH;
+  const letterSpacingPx = ((spec.charSpacing ?? 0) / 100) * PT_TO_PX;
   try {
-    const prepared = prepareWithSegments(el.text, fontShorthand(fontSizePx, el), {
-      letterSpacing: letterSpacingPx || undefined,
-    });
+    const prepared = prepareWithSegments(
+      spec.text,
+      fontShorthand(fontSizePx, spec),
+      {
+        letterSpacing: letterSpacingPx || undefined,
+      },
+    );
     const { lines } = layoutWithLines(prepared, widthPx, lineHeightPx);
-    if (!lines.length) return [el.text];
+    if (!lines.length) return [spec.text];
     return lines.map((line) => line.text);
   } catch {
-    return [el.text];
+    return [spec.text];
   }
 }

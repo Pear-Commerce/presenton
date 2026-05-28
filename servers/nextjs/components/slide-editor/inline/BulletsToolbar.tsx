@@ -1,5 +1,6 @@
 import type { BulletsSlideElement } from "../state";
 import { withHash, withoutHash } from "../editorUtils";
+import { elementFont, mergeFont } from "../lib/element-model";
 import { InlineToolbar } from "./InlineToolbar";
 import { inlineStyles } from "./inlineStyles";
 
@@ -14,6 +15,7 @@ export function BulletsToolbar({
   scale: number;
   onChange: (index: number, element: BulletsSlideElement) => void;
 }) {
+  const font = elementFont(element);
   return (
     <InlineToolbar element={element} scale={scale}>
       <input
@@ -22,12 +24,9 @@ export function BulletsToolbar({
         type="number"
         min={8}
         max={36}
-        value={element.fontSize}
+        value={font.size}
         onChange={(event) =>
-          onChange(index, {
-            ...element,
-            fontSize: Number(event.target.value) || element.fontSize,
-          })
+          onChange(index, mergeFont(element, { size: Number(event.target.value) || font.size }))
         }
         style={inlineStyles.numberInput}
       />
@@ -35,12 +34,9 @@ export function BulletsToolbar({
         aria-label="Bullet color"
         title="Color"
         type="color"
-        value={withHash(element.color)}
+        value={withHash(font.color)}
         onChange={(event) =>
-          onChange(index, {
-            ...element,
-            color: withoutHash(event.target.value),
-          })
+          onChange(index, mergeFont(element, { color: withoutHash(event.target.value) }))
         }
         style={inlineStyles.colorInput}
       />
@@ -51,29 +47,9 @@ export function BulletsToolbar({
         min={0.9}
         max={2}
         step={0.05}
-        value={element.lineSpacingMultiple ?? 1.3}
+        value={font.lineHeight ?? 1.3}
         onChange={(event) =>
-          onChange(index, {
-            ...element,
-            lineSpacingMultiple:
-              Number(event.target.value) || element.lineSpacingMultiple || 1.3,
-          })
-        }
-        style={inlineStyles.numberInput}
-      />
-      <input
-        aria-label="Bullet item gap"
-        title="Item gap"
-        type="number"
-        min={0}
-        max={0.4}
-        step={0.02}
-        value={element.itemGap ?? 0.05}
-        onChange={(event) =>
-          onChange(index, {
-            ...element,
-            itemGap: Number(event.target.value) || element.itemGap || 0,
-          })
+          onChange(index, mergeFont(element, { lineHeight: Number(event.target.value) || font.lineHeight || 1.3 }))
         }
         style={inlineStyles.numberInput}
       />

@@ -1,4 +1,5 @@
 import type { ChartDatum } from "../lib/slide-schema";
+import { elementBox } from "../lib/element-model";
 import type { ChartSlideElement } from "../state";
 import { inlineStyles } from "./inlineStyles";
 
@@ -19,6 +20,8 @@ export function ChartInlineEditor({
   onChange: (index: number, element: ChartSlideElement) => void;
   onClose: () => void;
 }) {
+  const box = elementBox(element);
+
   return (
     <textarea
       autoFocus
@@ -35,10 +38,10 @@ export function ChartInlineEditor({
       spellCheck={false}
       style={{
         ...inlineStyles.textEditor,
-        left: element.x * scale,
-        top: element.y * scale,
-        width: element.w * scale,
-        height: element.h * scale,
+        left: box.x * scale,
+        top: box.y * scale,
+        width: box.w * scale,
+        height: box.h * scale,
         color: "#1a2b45",
         fontFamily: "Arial, Helvetica, sans-serif",
         fontSize: 12 * (scale / 96),

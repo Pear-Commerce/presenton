@@ -1,5 +1,11 @@
 import type { TextSlideElement } from "../state";
 import { PT_TO_PX, PX_PER_IN, withHash } from "../editorUtils";
+import {
+  elementBox,
+  elementFont,
+  setTextContent,
+  textContent,
+} from "../lib/element-model";
 import { inlineStyles } from "./inlineStyles";
 
 export function TextInlineEditor({
@@ -15,12 +21,14 @@ export function TextInlineEditor({
   onChange: (index: number, element: TextSlideElement) => void;
   onClose: () => void;
 }) {
+  const box = elementBox(element);
+  const font = elementFont(element);
   return (
     <textarea
       autoFocus
-      value={element.text}
+      value={textContent(element)}
       onChange={(event) =>
-        onChange(index, { ...element, text: event.target.value || " " })
+        onChange(index, setTextContent(element, event.target.value || " "))
       }
       onBlur={onClose}
       onKeyDown={(event) => {
@@ -28,18 +36,19 @@ export function TextInlineEditor({
       }}
       style={{
         ...inlineStyles.textEditor,
-        left: element.x * scale,
-        top: element.y * scale,
-        width: element.w * scale,
-        height: element.h * scale,
-        color: withHash(element.color),
-        fontFamily: `${element.fontFace ?? "Arial"}, Helvetica, sans-serif`,
-        fontSize: element.fontSize * PT_TO_PX * (scale / PX_PER_IN),
-        fontWeight: element.bold ? 700 : 400,
-        fontStyle: element.italic ? "italic" : "normal",
-        textAlign: element.align ?? "left",
-        lineHeight: element.lineHeight ?? 1.15,
-        letterSpacing: ((element.charSpacing ?? 0) / 100) * PT_TO_PX * (scale / PX_PER_IN),
+        left: box.x * scale,
+        top: box.y * scale,
+        width: box.w * scale,
+        height: box.h * scale,
+        color: withHash(font.color),
+        fontFamily: `${font.family}, Helvetica, sans-serif`,
+        fontSize: font.size * PT_TO_PX * (scale / PX_PER_IN),
+        fontWeight: font.bold ? 700 : 400,
+        fontStyle: font.italic ? "italic" : "normal",
+        textAlign: element.alignment?.horizontal ?? "left",
+        lineHeight: font.lineHeight ?? 1.15,
+        letterSpacing:
+          ((font.letterSpacing ?? 0) / 100) * PT_TO_PX * (scale / PX_PER_IN),
       }}
     />
   );

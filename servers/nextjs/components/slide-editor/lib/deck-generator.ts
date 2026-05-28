@@ -4,7 +4,6 @@ import {
   type Deck,
   type Slide,
   type SlideElement,
-  type ThemeRole,
 } from "./slide-schema";
 
 export const MIN_SLIDE_COUNT = 5;
@@ -72,67 +71,6 @@ function palette(input: DeckGenerationInput) {
     white: cleanHex(input.theme.surface, "FFFFFF"),
     line: "DDE4EF",
   };
-}
-
-function roleForColor(
-  color: string | null | undefined,
-  colors: ReturnType<typeof palette>,
-): ThemeRole | undefined {
-  if (!color) return undefined;
-  const normalized = cleanHex(color, "");
-  const roles: ThemeRole[] = [
-    "background",
-    "surface",
-    "primary",
-    "secondary",
-    "accent",
-    "text",
-    "muted",
-  ];
-  return roles.find((role) => colors[role] === normalized);
-}
-
-function applyGeneratedThemeRoles(deck: Deck, colors: ReturnType<typeof palette>) {
-  for (const slide of deck.slides) {
-    slide.backgroundRole = roleForColor(slide.background, colors);
-    for (const element of slide.elements) applyElementThemeRoles(element, colors);
-  }
-}
-
-function applyElementThemeRoles(
-  element: SlideElement,
-  colors: ReturnType<typeof palette>,
-) {
-  if (element.kind === "text") {
-    element.colorRole = roleForColor(element.color, colors);
-    return;
-  }
-  if (element.kind === "rect" || element.kind === "ellipse") {
-    element.fillRole = roleForColor(element.fill, colors);
-    if (element.line) element.line.colorRole = roleForColor(element.line.color, colors);
-    return;
-  }
-  if (element.kind === "bullets") {
-    element.colorRole = roleForColor(element.color, colors);
-    element.bulletColorRole = roleForColor(element.bulletColor, colors);
-    return;
-  }
-  if (element.kind === "chart") {
-    element.colorRole = roleForColor(element.color, colors);
-    element.axisColorRole = roleForColor(element.axisColor, colors);
-    element.labelColorRole = roleForColor(element.labelColor, colors);
-    element.data.forEach((datum) => {
-      datum.colorRole = roleForColor(datum.color, colors);
-    });
-    return;
-  }
-  if (element.kind === "table") {
-    element.textColorRole = roleForColor(element.textColor, colors);
-    element.headerFillRole = roleForColor(element.headerFill, colors);
-    element.headerTextColorRole = roleForColor(element.headerTextColor, colors);
-    element.borderColorRole = roleForColor(element.borderColor, colors);
-    element.fillRole = roleForColor(element.fill, colors);
-  }
 }
 
 export function fallbackOutline(input: DeckGenerationInput): SlideOutline {
@@ -208,32 +146,192 @@ export function fallbackOutline(input: DeckGenerationInput): SlideOutline {
   };
 }
 
+function box(x: number, y: number, w: number, h: number) {
+  return {
+    position: { x, y },
+    size: { width: w, height: h },
+  };
+}
+
+function textElement({
+  align,
+  bold,
+  color,
+  h,
+  lineHeight,
+  size,
+  text,
+  tracking,
+  w,
+  x,
+  y,
+}: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  text: string;
+  size: number;
+  color: string;
+  bold?: boolean;
+  lineHeight?: number;
+  tracking?: number;
+  align?: "left" | "center" | "right";
+}): SlideElement {
+  return {
+    type: "text",
+    ...box(x, y, w, h),
+    runs: [{ text }],
+    font: {
+      family: SANS,
+      size,
+      color,
+      bold,
+      lineHeight,
+      letterSpacing: tracking,
+    },
+    alignment: align ? { horizontal: align } : undefined,
+  };
+}
+
+function rectElement({
+  color,
+  h,
+  opacity,
+  radius,
+  stroke,
+  w,
+  x,
+  y,
+}: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+  opacity?: number;
+  radius?: number;
+  stroke?: { color: string; width: number };
+}): SlideElement {
+  return {
+    type: "rectangle",
+    ...box(x, y, w, h),
+    fill: { color },
+    opacity,
+    borderRadius:
+      radius == null
+        ? undefined
+        : { tl: radius, tr: radius, bl: radius, br: radius },
+    stroke,
+  };
+}
+
+function ellipseElement({
+  color,
+  h,
+  opacity,
+  w,
+  x,
+  y,
+}: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+  opacity?: number;
+}): SlideElement {
+  return {
+    type: "ellipse",
+    ...box(x, y, w, h),
+    fill: { color },
+    opacity,
+  };
+}
+
+function bulletsElement({
+  color,
+  h,
+  items,
+  lineHeight = 1.3,
+  size,
+  w,
+  x,
+  y,
+}: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  items: string[];
+  size: number;
+  color: string;
+  lineHeight?: number;
+}): SlideElement {
+  return {
+    type: "text-list",
+    ...box(x, y, w, h),
+    marker: "bullet",
+    items: items.map((item) => ({ type: "text", text: item })),
+    font: { family: SANS, size, color, lineHeight },
+  };
+}
+
+function tableElement({
+  colors,
+  h,
+  rows,
+  w,
+  x,
+  y,
+}: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rows: string[][];
+  colors: ReturnType<typeof palette>;
+}): SlideElement {
+  const [header = [], ...body] = rows;
+  const cell = (text: string, headerCell = false) => ({
+    text,
+    fill: { color: headerCell ? colors.primary : colors.white },
+    stroke: { color: colors.line, width: 0.5 },
+    font: headerCell
+      ? { color: colors.white, bold: true }
+      : { color: colors.text },
+  });
+  return {
+    type: "table",
+    ...box(x, y, w, h),
+    font: { family: SANS, size: 10, color: colors.text },
+    columns: header.map((value) => cell(value, true)),
+    rows: body.map((row) => row.map((value) => cell(value))),
+  };
+}
+
 function footer(index: number, total: number, color: string): SlideElement[] {
   return [
-    {
-      kind: "text",
+    textElement({
       x: 0.55,
       y: 5.22,
       w: 4,
       h: 0.25,
       text: "GENERATED DECK",
-      fontFace: SANS,
-      fontSize: 8,
+      size: 8,
       color,
-      charSpacing: 180,
-    },
-    {
-      kind: "text",
+      tracking: 180,
+    }),
+    textElement({
       x: 8.35,
       y: 5.22,
       w: 1.1,
       h: 0.25,
       text: `${String(index).padStart(2, "0")} / ${String(total).padStart(2, "0")}`,
-      fontFace: SANS,
-      fontSize: 8,
+      size: 8,
       color,
       align: "right",
-    },
+    }),
   ];
 }
 
@@ -242,41 +340,36 @@ function titleSlide(outline: SlideOutline, colors: ReturnType<typeof palette>, t
     title: "Title",
     background: colors.primary,
     elements: [
-      { kind: "rect", x: 0.65, y: 0.7, w: 0.72, h: 0.06, fill: colors.accent },
-      {
-        kind: "text",
+      rectElement({ x: 0.65, y: 0.7, w: 0.72, h: 0.06, color: colors.accent }),
+      textElement({
         x: 0.65,
         y: 1.35,
         w: 8.1,
         h: 1.35,
         text: outline.title,
-        fontFace: SANS,
-        fontSize: 44,
+        size: 44,
         bold: true,
         color: colors.white,
         lineHeight: 0.95,
-      },
-      {
-        kind: "text",
+      }),
+      textElement({
         x: 0.7,
         y: 3.05,
         w: 6.8,
         h: 0.72,
         text: outline.subtitle,
-        fontFace: SANS,
-        fontSize: 17,
+        size: 17,
         color: "DCE6F2",
         lineHeight: 1.2,
-      },
-      {
-        kind: "ellipse",
+      }),
+      ellipseElement({
         x: 7.25,
         y: 0.75,
         w: 2.4,
         h: 2.4,
-        fill: colors.accent,
+        color: colors.accent,
         opacity: 0.18,
-      },
+      }),
       ...footer(1, total, "9FB0C8"),
     ],
   };
@@ -287,71 +380,62 @@ function agendaSlide(outline: SlideOutline, colors: ReturnType<typeof palette>, 
     title: "Outline",
     background: colors.background,
     elements: [
-      {
-        kind: "text",
+      textElement({
         x: 0.65,
         y: 0.55,
         w: 6.8,
         h: 0.48,
         text: "Deck outline",
-        fontFace: SANS,
-        fontSize: 26,
+        size: 26,
         bold: true,
         color: colors.text,
-      },
+      }),
       ...outline.sections.flatMap((section, sectionIndex) => {
         const col = sectionIndex % 2;
         const row = Math.floor(sectionIndex / 2);
         const x = 0.65 + col * 4.43;
         const y = 1.35 + row * 1.7;
         return [
-          {
-            kind: "rect" as const,
+          rectElement({
             x,
             y,
             w: 4.25,
             h: 1.52,
-            fill: colors.white,
-            line: { color: colors.line, width: 0.75 },
-            rx: 0.08,
-          },
-          {
-            kind: "text" as const,
+            color: colors.white,
+            stroke: { color: colors.line, width: 0.75 },
+            radius: 0.08,
+          }),
+          textElement({
             x: x + 0.2,
             y: y + 0.2,
             w: 0.75,
             h: 0.4,
             text: String(sectionIndex + 1).padStart(2, "0"),
-            fontFace: SANS,
-            fontSize: 25,
+            size: 25,
             bold: true,
             color: colors.primary,
-          },
-          {
-            kind: "text" as const,
+          }),
+          textElement({
             x: x + 1.05,
             y: y + 0.25,
             w: 2.85,
             h: 0.32,
             text: section.title.toUpperCase(),
-            fontFace: SANS,
-            fontSize: 9,
+            size: 9,
             bold: true,
             color: colors.muted,
-            charSpacing: 120,
-          },
-          {
-            kind: "text" as const,
+            tracking: 120,
+          }),
+          textElement({
             x: x + 1.05,
             y: y + 0.68,
             w: 2.85,
             h: 0.45,
             text: section.summary,
-            fontFace: SANS,
-            fontSize: 9,
+            size: 9,
             color: colors.text,
             lineHeight: 1.18,
-          },
+          }),
         ];
       }),
       ...footer(2, total, colors.muted),
@@ -374,42 +458,35 @@ function sectionSlide(
   const visualY = Math.max(1.05, 0.82 + titleHeight + 0.18);
   const visualH = Math.max(2.2, 4.35 - visualY);
   const base: SlideElement[] = [
-    { kind: "rect", x: 0.65, y: 0.62, w: 0.55, h: 0.06, fill: colors.accent },
-    {
-      kind: "text",
+    rectElement({ x: 0.65, y: 0.62, w: 0.55, h: 0.06, color: colors.accent }),
+    textElement({
       x: 0.65,
       y: 0.82,
       w: titleWidth,
       h: titleHeight,
       text: section.title,
-      fontFace: SANS,
-      fontSize: 26,
+      size: 26,
       bold: true,
       color: colors.text,
       lineHeight: 1.05,
-    },
-    {
-      kind: "text",
+    }),
+    textElement({
       x: 0.68,
       y: summaryY,
       w: leftColumnWidth,
       h: 0.78,
       text: section.summary,
-      fontFace: SANS,
-      fontSize: 14,
+      size: 14,
       color: colors.muted,
       lineHeight: 1.25,
-    },
+    }),
   ];
 
   const visual: SlideElement =
     section.visual === "chart"
       ? {
-          kind: "chart",
-          x: 5.25,
-          y: visualY,
-          w: 3.9,
-          h: visualH,
+          type: "chart",
+          ...box(5.25, visualY, 3.9, visualH),
           chartType: "bar",
           title: "Signal strength",
           data: section.bullets.slice(0, 4).map((label, itemIndex) => ({
@@ -423,42 +500,31 @@ function sectionSlide(
           showValues: true,
         }
       : section.visual === "table"
-          ? {
-              kind: "table",
-              x: 5.05,
-              y: visualY,
-              w: 4.1,
-              h: visualH,
-              rows: [
-                ["Phase", "Focus", "Output"],
-                ...section.bullets.slice(0, 4).map((item, itemIndex) => [
-                  `${itemIndex + 1}`,
-                  item.slice(0, 18),
-                  itemIndex === 0 ? "Learn" : itemIndex === 1 ? "Build" : "Ship",
-                ]),
-              ],
-              fontFace: SANS,
-              fontSize: 10,
-              textColor: colors.text,
-              headerFill: colors.primary,
-              headerTextColor: colors.white,
-              borderColor: colors.line,
-              fill: colors.white,
-            }
-          : {
-              kind: "bullets",
-              x: 5.05,
-              y: visualY,
-              w: 3.95,
-              h: visualH,
-              items: section.bullets,
-              fontFace: SANS,
-              fontSize: 17,
-              color: colors.text,
-              bulletColor: colors.accent,
-              lineSpacingMultiple: 1.35,
-              itemGap: 0.08,
-            };
+        ? tableElement({
+            x: 5.05,
+            y: visualY,
+            w: 4.1,
+            h: visualH,
+            colors,
+            rows: [
+              ["Phase", "Focus", "Output"],
+              ...section.bullets.slice(0, 4).map((item, itemIndex) => [
+                `${itemIndex + 1}`,
+                item.slice(0, 18),
+                itemIndex === 0 ? "Learn" : itemIndex === 1 ? "Build" : "Ship",
+              ]),
+            ],
+          })
+        : bulletsElement({
+            x: 5.05,
+            y: visualY,
+            w: 3.95,
+            h: visualH,
+            items: section.bullets,
+            size: 17,
+            color: colors.text,
+            lineHeight: 1.35,
+          });
 
   return {
     title: section.title,
@@ -468,20 +534,16 @@ function sectionSlide(
       ...(section.visual === "bullets"
         ? []
         : [
-            {
-              kind: "bullets" as const,
+            bulletsElement({
               x: 0.8,
               y: bulletsY,
               w: 3.7,
               h: Math.max(1.2, 4.82 - bulletsY),
               items: section.bullets.slice(0, 4),
-              fontFace: SANS,
-              fontSize: 14,
+              size: 14,
               color: colors.text,
-              bulletColor: colors.accent,
-              lineSpacingMultiple: 1.25,
-              itemGap: 0.07,
-            },
+              lineHeight: 1.25,
+            }),
           ]),
       visual,
       ...footer(index, total, colors.muted),
@@ -500,7 +562,7 @@ export function deckFromOutline(input: DeckGenerationInput, outline: SlideOutlin
     ),
   ];
 
-  const deck = DeckSchema.parse({
+  return DeckSchema.parse({
     title: outline.title,
     description: input.description,
     theme: {
@@ -514,8 +576,6 @@ export function deckFromOutline(input: DeckGenerationInput, outline: SlideOutlin
     },
     slides,
   });
-  applyGeneratedThemeRoles(deck, colors);
-  return deck;
 }
 
 export function generateFallbackDeck(input: DeckGenerationInput): Deck {

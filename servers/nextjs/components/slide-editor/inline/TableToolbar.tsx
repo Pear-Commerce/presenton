@@ -1,5 +1,12 @@
 import type { TableCellSelection, TableSlideElement } from "../state";
 import { withHash, withoutHash } from "../editorUtils";
+import {
+  elementFont,
+  mergeFont,
+  setTableRowsFromStrings,
+  tableRowsAsStrings,
+} from "../lib/element-model";
+import type { TableCell } from "../lib/slide-schema";
 import { InlineToolbar } from "./InlineToolbar";
 import { inlineStyles } from "./inlineStyles";
 
@@ -16,39 +23,60 @@ export function TableToolbar({
   selectedCell: TableCellSelection | null;
   onChange: (index: number, element: TableSlideElement) => void;
 }) {
-  const columnCount = Math.max(
-    1,
-    ...element.rows.map((row: any) => row.length),
-  );
-  const canAddRow = element.rows.length < 8;
+  const font = elementFont(element);
+  const rows = tableRowsAsStrings(element);
+  const columnCount = Math.max(1, ...rows.map((row) => row.length));
+  const canAddRow = rows.length < 8;
   const canAddColumn = columnCount < 6;
-  const activeRow = selectedCell?.rowIndex ?? element.rows.length - 1;
+  const activeRow = selectedCell?.rowIndex ?? rows.length - 1;
   const activeColumn = selectedCell?.colIndex ?? columnCount - 1;
   const normalizeRows = (rows: string[][]) =>
     rows.map((row) =>
       Array.from({ length: columnCount }, (_, colIndex) => row[colIndex] ?? ""),
     );
   const insertRow = (position: "above" | "below") => {
-    const rows = normalizeRows(element.rows);
-    const insertIndex = position === "above" ? activeRow : activeRow + 1;
-    rows.splice(
+    const nextRows = normalizeRows(rows);
+    const insertIndex =
+      position === "above" ? Math.max(1, activeRow) : activeRow + 1;
+    nextRows.splice(
       insertIndex,
       0,
       Array.from({ length: columnCount }, () => ""),
     );
-    onChange(index, { ...element, rows: rows.slice(0, 8) });
+    onChange(index, setTableRowsFromStrings(element, nextRows.slice(0, 8)));
   };
   const insertColumn = (position: "left" | "right") => {
     const insertIndex = position === "left" ? activeColumn : activeColumn + 1;
+    const nextRows = rows.map((row) => {
+      const next = [...row];
+      next.splice(insertIndex, 0, "");
+      return next.slice(0, 6);
+    });
+    onChange(index, setTableRowsFromStrings(element, nextRows));
+  };
+  const updateColumns = (cell: (cell: TableCell) => TableCell) =>
     onChange(index, {
       ...element,
-      rows: element.rows.map((row: any) => {
-        const next = [...row];
-        next.splice(insertIndex, 0, "");
-        return next.slice(0, 6);
-      }),
+      columns: element.columns.map((column) => cell(column)),
     });
-  };
+  const updateBodyCells = (cell: (cell: TableCell) => TableCell) =>
+    onChange(index, {
+      ...element,
+      rows: element.rows.map((row) => row.map((item) => cell(item))),
+    });
+  const updateAllCells = (cell: (cell: TableCell) => TableCell) =>
+    onChange(index, {
+      ...element,
+      columns: element.columns.map((column) => cell(column)),
+      rows: element.rows.map((row) => row.map((item) => cell(item))),
+    });
+  const headerFill = element.columns[0]?.fill?.color ?? "0B1F3A";
+  const headerTextColor = element.columns[0]?.font?.color ?? "FFFFFF";
+  const bodyFill = element.rows[0]?.[0]?.fill?.color ?? "FFFFFF";
+  const borderColor =
+    element.columns[0]?.stroke?.color ??
+    element.rows[0]?.[0]?.stroke?.color ??
+    "D9E2EF";
 
   return (
     <InlineToolbar element={element} scale={scale}>
@@ -114,12 +142,14 @@ export function TableToolbar({
         type="number"
         min={6}
         max={28}
-        value={element.fontSize}
+        value={font.size}
         onChange={(event) =>
-          onChange(index, {
-            ...element,
-            fontSize: Number(event.target.value) || element.fontSize,
-          })
+          onChange(
+            index,
+            mergeFont(element, {
+              size: Number(event.target.value) || font.size,
+            }),
+          )
         }
         style={inlineStyles.numberInput}
       />
@@ -127,12 +157,12 @@ export function TableToolbar({
         aria-label="Table text color"
         title="Text"
         type="color"
-        value={withHash(element.textColor)}
+        value={withHash(font.color)}
         onChange={(event) =>
-          onChange(index, {
-            ...element,
-            textColor: withoutHash(event.target.value),
-          })
+          onChange(
+            index,
+            mergeFont(element, { color: withoutHash(event.target.value) }),
+          )
         }
         style={inlineStyles.colorInput}
       />
@@ -140,49 +170,60 @@ export function TableToolbar({
         aria-label="Table header fill"
         title="Header fill"
         type="color"
-        value={withHash(element.headerFill)}
-        onChange={(event) =>
-          onChange(index, {
-            ...element,
-            headerFill: withoutHash(event.target.value),
-          })
-        }
+        value={withHash(headerFill)}
+        onChange={(event) => {
+          const color = withoutHash(event.target.value);
+          updateColumns((cell) => ({
+            ...cell,
+            fill: { ...(cell.fill ?? {}), color },
+          }));
+        }}
         style={inlineStyles.colorInput}
       />
       <input
         aria-label="Table header text"
         title="Header text"
         type="color"
-        value={withHash(element.headerTextColor)}
-        onChange={(event) =>
-          onChange(index, {
-            ...element,
-            headerTextColor: withoutHash(event.target.value),
-          })
-        }
+        value={withHash(headerTextColor)}
+        onChange={(event) => {
+          const color = withoutHash(event.target.value);
+          updateColumns((cell) => ({
+            ...cell,
+            font: { ...(cell.font ?? {}), color, bold: true },
+          }));
+        }}
         style={inlineStyles.colorInput}
       />
       <input
         aria-label="Table fill"
         title="Fill"
         type="color"
-        value={withHash(element.fill ?? "FFFFFF")}
-        onChange={(event) =>
-          onChange(index, { ...element, fill: withoutHash(event.target.value) })
-        }
+        value={withHash(bodyFill)}
+        onChange={(event) => {
+          const color = withoutHash(event.target.value);
+          updateBodyCells((cell) => ({
+            ...cell,
+            fill: { ...(cell.fill ?? {}), color },
+          }));
+        }}
         style={inlineStyles.colorInput}
       />
       <input
         aria-label="Table border"
         title="Border"
         type="color"
-        value={withHash(element.borderColor)}
-        onChange={(event) =>
-          onChange(index, {
-            ...element,
-            borderColor: withoutHash(event.target.value),
-          })
-        }
+        value={withHash(borderColor)}
+        onChange={(event) => {
+          const color = withoutHash(event.target.value);
+          updateAllCells((cell) => ({
+            ...cell,
+            stroke: {
+              ...(cell.stroke ?? {}),
+              color,
+              width: cell.stroke?.width ?? 1,
+            },
+          }));
+        }}
         style={inlineStyles.colorInput}
       />
       <input

@@ -26,6 +26,7 @@ import {
   svgDraftFromElement,
   tableDraftFromElement,
 } from "../../../inline";
+import { textListStrings } from "../../../lib/element-model";
 
 export function useEditorCanvasInteractions({
   onEditImage,
@@ -79,7 +80,7 @@ export function useEditorCanvasInteractions({
     (index: number) => {
       const element = slide.elements[index];
       setEditingBulletsDraft(
-        element?.kind === "bullets" ? element.items.join("\n") : "",
+        element?.type === "text-list" ? textListStrings(element).join("\n") : "",
       );
       setEditingTableIndex(null);
       setEditingChartIndex(null);
@@ -102,7 +103,7 @@ export function useEditorCanvasInteractions({
     (index: number) => {
       const element = slide.elements[index];
       setEditingTableDraft(
-        element?.kind === "table" ? tableDraftFromElement(element) : "",
+        element?.type === "table" ? tableDraftFromElement(element) : "",
       );
       setEditingTextIndex(null);
       setEditingBulletsIndex(null);
@@ -125,7 +126,7 @@ export function useEditorCanvasInteractions({
     (index: number) => {
       const element = slide.elements[index];
       setEditingChartDraft(
-        element?.kind === "chart" ? chartDraftFromElement(element) : "",
+        element?.type === "chart" ? chartDraftFromElement(element) : "",
       );
       setEditingTextIndex(null);
       setEditingBulletsIndex(null);
@@ -148,7 +149,7 @@ export function useEditorCanvasInteractions({
     (index: number) => {
       const element = slide.elements[index];
       setEditingSvgDraft(
-        element?.kind === "svg" ? svgDraftFromElement(element) : "",
+        element?.type === "svg" ? svgDraftFromElement(element) : "",
       );
       setEditingTextIndex(null);
       setEditingBulletsIndex(null);

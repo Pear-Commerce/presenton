@@ -1,4 +1,5 @@
 import { SLIDE_H, SLIDE_W } from "../lib/slide-schema";
+import { elementBox, resizeElement } from "../lib/element-model";
 import { sanitizeSvgMarkup } from "../lib/svg-sanitize";
 import type { SvgSlideElement } from "../state";
 import { createDefaultElement } from "../state";
@@ -29,7 +30,7 @@ export function SvgToolbar({
 
   const resetSvg = () => {
     const next = createDefaultElement("svg");
-    if (next.kind !== "svg") return;
+    if (next.type !== "svg") return;
 
     onChange(index, {
       ...element,
@@ -118,21 +119,23 @@ function resizeSvg(
   element: SvgSlideElement,
   preset: "square" | "wide" | "tall",
 ): SvgSlideElement {
+  const box = elementBox(element);
+
   if (preset === "square") {
     const side = Math.min(
-      element.w,
-      element.h,
-      SLIDE_W - element.x,
-      SLIDE_H - element.y,
+      box.w,
+      box.h,
+      SLIDE_W - box.x,
+      SLIDE_H - box.y,
     );
-    return { ...element, w: side, h: side };
+    return resizeElement(element, { w: side, h: side });
   }
 
   const ratio = preset === "wide" ? 16 / 9 : 3 / 4;
-  const maxW = SLIDE_W - element.x;
-  const maxH = SLIDE_H - element.y;
-  const nextW = Math.min(maxW, Math.max(0.6, element.w));
+  const maxW = SLIDE_W - box.x;
+  const maxH = SLIDE_H - box.y;
+  const nextW = Math.min(maxW, Math.max(0.6, box.w));
   const nextH = Math.min(maxH, Math.max(0.4, nextW / ratio));
 
-  return { ...element, w: Math.min(maxW, nextH * ratio), h: nextH };
+  return resizeElement(element, { w: Math.min(maxW, nextH * ratio), h: nextH });
 }

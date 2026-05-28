@@ -1,3 +1,4 @@
+import { elementBox } from "../lib/element-model";
 import { sanitizeSvgMarkup } from "../lib/svg-sanitize";
 import type { SvgSlideElement } from "../state";
 import { inlineStyles } from "./inlineStyles";
@@ -19,6 +20,8 @@ export function SvgInlineEditor({
   onChange: (index: number, element: SvgSlideElement) => void;
   onClose: () => void;
 }) {
+  const box = elementBox(element);
+
   return (
     <textarea
       autoFocus
@@ -36,10 +39,10 @@ export function SvgInlineEditor({
       spellCheck={false}
       style={{
         ...inlineStyles.textEditor,
-        left: element.x * scale,
-        top: element.y * scale,
-        width: element.w * scale,
-        height: element.h * scale,
+        left: box.x * scale,
+        top: box.y * scale,
+        width: box.w * scale,
+        height: box.h * scale,
         color: "#e7edf8",
         fontFamily: "Menlo, Consolas, monospace",
         fontSize: 10 * (scale / 96),

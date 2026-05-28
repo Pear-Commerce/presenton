@@ -1,6 +1,7 @@
 import { Arc, Ellipse, Group, Line, Rect, Text } from "react-konva";
 import type { ChartElement as ChartEl } from "../../lib/slide-schema";
 import { PX_PER_IN, withHash } from "../../editorUtils";
+import { chartColor as getChartColor } from "../../lib/element-model";
 import { rotationProps, shadowProps } from "./elementVisuals";
 import { geometry, type ElementCommonProps } from "./types";
 
@@ -32,7 +33,7 @@ export function ChartElement({
   const max = Math.max(1, ...element.data.map((datum) => datum.value));
   const titleH = element.title ? 24 * (scale / PX_PER_IN) : 8;
   const pad = 12 * (scale / PX_PER_IN);
-  const chartColor = withHash(element.color);
+  const chartColor = withHash(getChartColor(element));
   const axisColor = withHash(element.axisColor ?? "9AA7BD");
   const labelColor = withHash(element.labelColor ?? "6A7894");
   const plot = {
@@ -50,7 +51,7 @@ export function ChartElement({
       y={y}
       width={width}
       height={height}
-      {...rotationProps(element as any)}
+      {...rotationProps(element)}
       opacity={element.opacity ?? 1}
       {...shadowProps(element.shadow, scale)}
       {...events}

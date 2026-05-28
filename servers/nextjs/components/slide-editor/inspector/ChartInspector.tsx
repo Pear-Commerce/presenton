@@ -36,7 +36,7 @@ export function ChartInspector({
           />
           <ColorField
             label="Color"
-            value={element.color}
+            value={element.color ?? "D4A24C"}
             onChange={(color) => onPatch({ color })}
           />
         </div>

@@ -7,6 +7,17 @@ import {
 } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import type { SlideElement } from "../lib/slide-schema";
+import {
+  elementBox,
+  fillColor,
+  setTableRowsFromStrings,
+  setTextContent,
+  setTextListStrings,
+  strokeColor,
+  tableRowsAsStrings,
+  textContent,
+  textListStrings,
+} from "../lib/element-model";
 import type { ComponentTemplate } from "../componentTemplates";
 import { editorTheme, styles } from "../editorStyles";
 import { kindLabel, withHash, withoutHash } from "../editorUtils";
@@ -138,7 +149,7 @@ export function SlideEditorDrawer({
               {selectedGroupedComponentRun
                 ? componentLabel(selectedGroupedComponentRun.componentId)
                 : selectedElement
-                  ? kindLabel(selectedElement.kind)
+                  ? kindLabel(selectedElement.type)
                   : "Slide"}
             </h2>
           </div>
@@ -323,29 +334,31 @@ function ComponentRunInspector({
       {editableItems.map(({ index, element }, fieldIndex) => {
         const label = componentFieldLabel(element, fieldIndex);
 
-        if (element.kind === "text") {
+        if (element.type === "text") {
           return (
             <TextareaField
               key={index}
               label={label}
               rows={label.toLowerCase().includes("description") ? 4 : 2}
-              value={element.text}
+              value={textContent(element)}
               onChange={(text) => {
                 if (text.trim()) {
-                  onPatch(index, { text } as Partial<SlideElement>);
+                  onPatch(index, {
+                    runs: setTextContent(element, text).runs,
+                  } as Partial<SlideElement>);
                 }
               }}
             />
           );
         }
 
-        if (element.kind === "bullets") {
+        if (element.type === "text-list") {
           return (
             <TextareaField
               key={index}
               label={label}
               rows={5}
-              value={element.items.join("\n")}
+              value={textListStrings(element).join("\n")}
               onChange={(value) => {
                 const items = value
                   .split("\n")
@@ -353,14 +366,16 @@ function ComponentRunInspector({
                   .filter(Boolean)
                   .slice(0, 8);
                 if (items.length > 0) {
-                  onPatch(index, { items } as Partial<SlideElement>);
+                  onPatch(index, {
+                    items: setTextListStrings(element, items).items,
+                  } as Partial<SlideElement>);
                 }
               }}
             />
           );
         }
 
-        if (element.kind === "image") {
+        if (element.type === "image") {
           return (
             <div key={index} style={styles.grid2}>
               <TextField
@@ -388,13 +403,15 @@ function ComponentRunInspector({
           );
         }
 
-        if (element.kind === "table") {
+        if (element.type === "table") {
           return (
             <TextareaField
               key={index}
               label={label}
               rows={6}
-              value={element.rows.map((row) => row.join(", ")).join("\n")}
+              value={tableRowsAsStrings(element)
+                .map((row) => row.join(", "))
+                .join("\n")}
               onChange={(value) => {
                 const rows = value
                   .split("\n")
@@ -407,7 +424,11 @@ function ComponentRunInspector({
                   .filter((row) => row.some(Boolean))
                   .slice(0, 8);
                 if (rows.length >= 2) {
-                  onPatch(index, { rows } as Partial<SlideElement>);
+                  const next = setTableRowsFromStrings(element, rows);
+                  onPatch(index, {
+                    columns: next.columns,
+                    rows: next.rows,
+                  } as Partial<SlideElement>);
                 }
               }}
             />
@@ -418,7 +439,7 @@ function ComponentRunInspector({
           <TextField
             key={index}
             label={label}
-            value={element.kind === "chart" ? element.title ?? "" : ""}
+            value={element.type === "chart" ? element.title ?? "" : ""}
             onChange={(title) =>
               onPatch(index, { title } as Partial<SlideElement>)
             }
@@ -431,11 +452,11 @@ function ComponentRunInspector({
 
 function isComponentDataElement(element: SlideElement) {
   return (
-    element.kind === "text" ||
-    element.kind === "bullets" ||
-    element.kind === "image" ||
-    element.kind === "table" ||
-    element.kind === "chart"
+    element.type === "text" ||
+    element.type === "text-list" ||
+    element.type === "image" ||
+    element.type === "table" ||
+    element.type === "chart"
   );
 }
 
@@ -443,10 +464,10 @@ function componentFieldLabel(element: SlideElement, fallbackIndex: number) {
   const slot =
     "componentSlot" in element && element.componentSlot
       ? element.componentSlot
-      : element.kind === "image" && element.name
+      : element.type === "image" && element.name
         ? element.name
         : "";
-  const label = slot ? componentLabel(slot) : kindLabel(element.kind);
+  const label = slot ? componentLabel(slot) : kindLabel(element.type);
   return `${label}${slot ? "" : ` ${fallbackIndex + 1}`}`;
 }
 
@@ -537,10 +558,11 @@ type PreviewBounds = {
 
 function boundsForElements(elements: SlideElement[]): PreviewBounds {
   if (elements.length === 0) return { x: 0, y: 0, w: 1, h: 1 };
-  const minX = Math.min(...elements.map((element) => element.x));
-  const minY = Math.min(...elements.map((element) => element.y));
-  const maxX = Math.max(...elements.map((element) => element.x + element.w));
-  const maxY = Math.max(...elements.map((element) => element.y + element.h));
+  const boxes = elements.map(elementBox);
+  const minX = Math.min(...boxes.map((box) => box.x));
+  const minY = Math.min(...boxes.map((box) => box.y));
+  const maxX = Math.max(...boxes.map((box) => box.x + box.w));
+  const maxY = Math.max(...boxes.map((box) => box.y + box.h));
   return {
     x: minX,
     y: minY,
@@ -553,10 +575,11 @@ function previewElementStyle(
   element: SlideElement,
   bounds: PreviewBounds,
 ): CSSProperties {
-  const left = ((element.x - bounds.x) / bounds.w) * 100;
-  const top = ((element.y - bounds.y) / bounds.h) * 100;
-  const width = (element.w / bounds.w) * 100;
-  const height = (element.h / bounds.h) * 100;
+  const box = elementBox(element);
+  const left = ((box.x - bounds.x) / bounds.w) * 100;
+  const top = ((box.y - bounds.y) / bounds.h) * 100;
+  const width = (box.w / bounds.w) * 100;
+  const height = (box.h / bounds.h) * 100;
   const style: CSSProperties = {
     position: "absolute",
     left: `${left}%`,
@@ -569,32 +592,30 @@ function previewElementStyle(
     transformOrigin: "center",
   };
 
-  if (element.kind === "text" || element.kind === "bullets") {
+  if (element.type === "text" || element.type === "text-list") {
     return {
       ...style,
       borderRadius: 2,
-      background: withHash(
-        element.kind === "text" ? element.color : element.color,
-      ),
+      background: withHash(element.font?.color ?? "1A2B45"),
       opacity: 0.75,
     };
   }
 
-  if (element.kind === "rect" || element.kind === "ellipse") {
+  if (element.type === "rectangle" || element.type === "ellipse") {
     return {
       ...style,
-      borderRadius: element.kind === "ellipse" ? "999px" : 3,
-      background: withHash(element.fill),
-      border: element.line
-        ? `1px solid ${withHash(element.line.color)}`
+      borderRadius: element.type === "ellipse" ? "999px" : 3,
+      background: withHash(fillColor(element.fill, "FFFFFF")),
+      border: element.stroke
+        ? `1px solid ${withHash(strokeColor(element.stroke))}`
         : undefined,
       boxShadow: element.shadow
-        ? `0 2px 8px rgba(0,0,0,${Math.min(0.35, element.shadow.opacity + 0.12)})`
+        ? `0 2px 8px rgba(0,0,0,${Math.min(0.35, (element.shadow.opacity ?? 0.2) + 0.12)})`
         : undefined,
     };
   }
 
-  if (element.kind === "image") {
+  if (element.type === "image") {
     return {
       ...style,
       borderRadius: 4,
@@ -605,21 +626,27 @@ function previewElementStyle(
     };
   }
 
-  if (element.kind === "table") {
+  if (element.type === "table") {
+    const bodyFill = element.rows[0]?.[0]?.fill?.color ?? "FFFFFF";
+    const borderColor =
+      element.columns[0]?.stroke?.color ??
+      element.rows[0]?.[0]?.stroke?.color ??
+      "D9E2EF";
+    const headerFill = element.columns[0]?.fill?.color ?? "0B1F3A";
     return {
       ...style,
       borderRadius: 3,
-      background: withHash(element.fill ?? "FFFFFF"),
-      border: `1px solid ${withHash(element.borderColor)}`,
-      backgroundImage: `linear-gradient(${withHash(element.headerFill)} 0 28%, transparent 28%)`,
+      background: withHash(bodyFill),
+      border: `1px solid ${withHash(borderColor)}`,
+      backgroundImage: `linear-gradient(${withHash(headerFill)} 0 28%, transparent 28%)`,
     };
   }
 
-  if (element.kind === "chart") {
+  if (element.type === "chart") {
     return {
       ...style,
       borderRadius: 4,
-    background: `linear-gradient(135deg, ${withHash(element.color)}, ${editorTheme.surfaceSubtle})`,
+      background: `linear-gradient(135deg, ${withHash(element.color ?? "D4A24C")}, ${editorTheme.surfaceSubtle})`,
     };
   }
 

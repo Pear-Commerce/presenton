@@ -1,5 +1,6 @@
 import { useMemo, type CSSProperties } from "react";
 import type { Slide } from "../../../lib/slide-schema";
+import { textListStrings } from "../../../lib/element-model";
 import { fitBulletsFontToBox } from "../../../lib/textMeasure";
 import {
   DomElementLayer,
@@ -24,7 +25,7 @@ export function BulletsDomElement({
   const effectiveFontSizes = useMemo(() => {
     const sizes = new Map<number, number>();
     slide.elements.forEach((element, index) => {
-      if (element.kind !== "bullets") return;
+      if (element.type !== "text-list") return;
       sizes.set(index, fitBulletsFontToBox(element));
     });
     return sizes;
@@ -34,50 +35,58 @@ export function BulletsDomElement({
     <DomElementLayer>
       {slide.elements.map((element, elementIndex) => {
         if (
-          element.kind !== "bullets" ||
+          element.type !== "text-list" ||
           editingBulletsIndex === elementIndex
         ) {
           return null;
         }
         const effective =
-          effectiveFontSizes.get(elementIndex) ?? element.fontSize;
+          effectiveFontSizes.get(elementIndex) ?? element.font?.size;
+        const items = textListStrings(element);
 
         return (
-          <ul
+          <ListTag
             key={elementIndex}
             style={{
               ...elementBoxStyle(element, scale),
               ...fontStyle(
                 {
-                  ...element,
-                  fontSize: effective,
-                  lineHeight: element.lineSpacingMultiple ?? 1.3,
+                  font: {
+                    ...(element.font ?? {}),
+                    size: effective,
+                    lineHeight: element.font?.lineHeight ?? 1.3,
+                  },
                 },
                 scale,
               ),
               ...listStyle,
+              listStyleType:
+                element.marker === "none"
+                  ? "none"
+                  : element.marker === "number"
+                    ? "decimal"
+                    : "disc",
             }}
           >
-            {element.items.map((item, itemIndex) => (
+            {items.map((item, itemIndex) => (
               <li
                 key={`${item}-${itemIndex}`}
                 style={{
                   ...itemStyle,
-                  marginBottom:
-                    itemIndex === element.items.length - 1
-                      ? 0
-                      : (element.itemGap ?? 0.05) * scale,
+                  marginBottom: itemIndex === items.length - 1 ? 0 : 0.05 * scale,
                 }}
               >
                 {item}
               </li>
             ))}
-          </ul>
+          </ListTag>
         );
       })}
     </DomElementLayer>
   );
 }
+
+const ListTag = "ul";
 
 const listStyle: CSSProperties = {
   margin: 0,

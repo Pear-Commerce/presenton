@@ -26,14 +26,14 @@ export function ElementInspector({
   onPatch,
   onReplace,
 }: ElementInspectorProps) {
-  const inspector = getElementDefinition(element.kind).inspector;
+  const inspector = getElementDefinition(element.type).inspector;
   const overflows = useAtomValue(selectedElementOverflowsAtom);
 
   const overflowBanner = overflows ? (
     <OverflowBanner element={element} />
   ) : null;
 
-  if (inspector === "chart" && element.kind === "chart") {
+  if (inspector === "chart" && element.type === "chart") {
     return (
       <>
         {overflowBanner}
@@ -46,7 +46,7 @@ export function ElementInspector({
     );
   }
 
-  if (inspector === "text" && element.kind === "text") {
+  if (inspector === "text" && element.type === "text") {
     return (
       <>
         {overflowBanner}
@@ -55,7 +55,7 @@ export function ElementInspector({
     );
   }
 
-  if (inspector === "bullets" && element.kind === "bullets") {
+  if (inspector === "bullets" && element.type === "text-list") {
     return (
       <>
         {overflowBanner}
@@ -64,22 +64,22 @@ export function ElementInspector({
     );
   }
 
-  if (inspector === "image" && element.kind === "image") {
+  if (inspector === "image" && element.type === "image") {
     return <ImageInspector element={element} onPatch={onPatch} />;
   }
 
   if (
     inspector === "shape" &&
-    (element.kind === "rect" || element.kind === "ellipse")
+    (element.type === "rectangle" || element.type === "ellipse")
   ) {
     return <ShapeInspector element={element} onPatch={onPatch} />;
   }
 
-  if (inspector === "table" && element.kind === "table") {
+  if (inspector === "table" && element.type === "table") {
     return <TableInspector element={element} onPatch={onPatch} />;
   }
 
-  if (inspector === "svg" && element.kind === "svg") {
+  if (inspector === "svg" && element.type === "svg") {
     return <SvgInspector element={element} onPatch={onPatch} />;
   }
 

@@ -23,7 +23,7 @@ type ElementToolbarProps = {
 
 const TOOLBAR_RENDERERS = {
   text: ({ element, index, onChange, scale }) =>
-    element.kind === "text" ? (
+    element.type === "text" ? (
       <TextToolbar
         element={element}
         index={index}
@@ -32,7 +32,7 @@ const TOOLBAR_RENDERERS = {
       />
     ) : null,
   bullets: ({ element, index, onChange, scale }) =>
-    element.kind === "bullets" ? (
+    element.type === "text-list" ? (
       <BulletsToolbar
         element={element}
         index={index}
@@ -41,7 +41,7 @@ const TOOLBAR_RENDERERS = {
       />
     ) : null,
   image: ({ element, index, onChange, onEditImage, scale }) =>
-    element.kind === "image" ? (
+    element.type === "image" ? (
       <ImageToolbar
         element={element}
         index={index}
@@ -51,7 +51,7 @@ const TOOLBAR_RENDERERS = {
       />
     ) : null,
   shape: ({ element, index, onChange, scale }) =>
-    element.kind === "rect" || element.kind === "ellipse" ? (
+    element.type === "rectangle" || element.type === "ellipse" ? (
       <ShapeToolbar
         element={element}
         index={index}
@@ -60,7 +60,7 @@ const TOOLBAR_RENDERERS = {
       />
     ) : null,
   chart: ({ element, index, onChange, scale }) =>
-    element.kind === "chart" ? (
+    element.type === "chart" ? (
       <ChartToolbar
         element={element}
         index={index}
@@ -69,7 +69,7 @@ const TOOLBAR_RENDERERS = {
       />
     ) : null,
   svg: ({ element, index, onChange, scale }) =>
-    element.kind === "svg" ? (
+    element.type === "svg" ? (
       <SvgToolbar
         element={element}
         index={index}
@@ -78,7 +78,7 @@ const TOOLBAR_RENDERERS = {
       />
     ) : null,
   table: ({ element, index, onChange, scale, selectedTableCell }) =>
-    element.kind === "table" ? (
+    element.type === "table" ? (
       <TableToolbar
         element={element}
         index={index}
@@ -95,7 +95,7 @@ const TOOLBAR_RENDERERS = {
 >;
 
 export function ElementToolbar(props: ElementToolbarProps) {
-  const toolbar = getElementDefinition(props.element.kind).toolbar;
+  const toolbar = getElementDefinition(props.element.type).toolbar;
   if (toolbar == null) return null;
 
   return TOOLBAR_RENDERERS[toolbar](props);

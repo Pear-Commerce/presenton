@@ -13,6 +13,7 @@ import {
   PPTY_DECK_SIDECAR_PATH,
   PPTY_IMAGE_PLACEHOLDER_TAG,
 } from "./pptx-tags";
+import { boxToPositionSize, uniformBorderRadius } from "./element-model";
 import { fitFontToBox } from "./textMeasure";
 
 // PPTX uses English Metric Units. 1 inch = 914400 EMU. PowerPoint stores
@@ -210,12 +211,9 @@ async function parseSlide(
     // The DeckSchema requires at least one element per slide. Add an
     // invisible 1x1 rect so the slide still validates.
     elements.push({
-      kind: "rect",
-      x: 0,
-      y: 0,
-      w: 0.1,
-      h: 0.1,
-      fill: background,
+      type: "rectangle",
+      ...boxToPositionSize({ x: 0, y: 0, w: 0.1, h: 0.1 }),
+      fill: { color: background },
       opacity: 0,
     });
   }
@@ -260,8 +258,8 @@ async function spToElement(
     const nameAttr =
       typeof cNvPr?.["@_descr"] === "string" ? (cNvPr["@_descr"] as string) : undefined;
     return {
-      kind: "image",
-      ...box,
+      type: "image",
+      ...boxToPositionSize(box),
       fit: "cover",
       name: nameAttr,
       shadow,
@@ -305,19 +303,23 @@ async function spToElement(
       box.h,
     );
     return {
-      kind: "text",
-      ...box,
-      text: trimmedText,
-      fontFace,
-      fontSize: clampFontSize(fittedSize),
+      type: "text",
+      ...boxToPositionSize(box),
+      runs: [{ text: trimmedText }],
+      font: {
+        family: fontFace,
+        size: clampFontSize(fittedSize),
+        color: text.color ?? "1A1A1A",
+        bold: text.bold || undefined,
+        italic: text.italic || undefined,
+        letterSpacing: charSpacing,
+        lineHeight: text.lineHeight ?? undefined,
+      },
+      alignment: {
+        horizontal: text.align ?? undefined,
+        vertical: text.valign ?? undefined,
+      },
       shadow,
-      bold: text.bold || undefined,
-      italic: text.italic || undefined,
-      color: text.color ?? "1A1A1A",
-      align: text.align ?? undefined,
-      valign: text.valign ?? undefined,
-      charSpacing,
-      lineHeight: text.lineHeight ?? undefined,
       opacity: fill === "00000000" ? undefined : undefined,
     };
   }
@@ -325,10 +327,22 @@ async function spToElement(
   // Geometry shape.
   const fill = extractFill(spPr) ?? "DDE5F0";
   if (isEllipseGeom(geomKind, box)) {
-    return { kind: "ellipse", ...box, fill, shadow };
+    return {
+      type: "ellipse",
+      ...boxToPositionSize(box),
+      fill: { color: fill },
+      shadow,
+    };
   }
   // Default to rect (covers rect, roundRect, and other rectilinear primitives).
-  return { kind: "rect", ...box, fill, shadow };
+  return {
+    type: "rectangle",
+    ...boxToPositionSize(box),
+    fill: { color: fill },
+    borderRadius:
+      geomKind === "roundRect" ? uniformBorderRadius(0.08) : undefined,
+    shadow,
+  };
 }
 
 // OOXML preset names PowerPoint and friends use for round shapes. The
@@ -388,8 +402,8 @@ async function picToElement(
   if (!bytes) return null;
 
   return {
-    kind: "image",
-    ...box,
+    type: "image",
+    ...boxToPositionSize(box),
     data: `data:${mime};base64,${bytes}`,
     name: nameFromNvProps(pic) ?? undefined,
     shadow,

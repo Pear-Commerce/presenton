@@ -23,7 +23,7 @@ export function useImageUpload() {
         return;
       }
       const target = activeSlide.elements[targetIndex];
-      if (target?.kind !== "image") {
+      if (target?.type !== "image") {
         event.target.value = "";
         return;
       }

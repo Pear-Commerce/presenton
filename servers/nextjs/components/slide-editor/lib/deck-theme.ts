@@ -1,4 +1,4 @@
-import type { Deck, SlideElement, ThemeRole } from "./slide-schema";
+import type { Deck, SlideElement, TableCell, ThemeRole } from "./slide-schema";
 
 export type DeckTheme = Record<ThemeRole, string>;
 
@@ -184,106 +184,82 @@ export function applyDeckTheme(deck: Deck, nextTheme: DeckTheme): void {
       nextTheme,
       colorMap,
     );
-    for (const element of slide.elements) applyElementTheme(element, nextTheme, colorMap);
+    for (const element of slide.elements) applyElementTheme(element, colorMap);
   }
 }
 
 function applyElementTheme(
   element: SlideElement,
-  theme: DeckTheme,
   colorMap: Map<string, string>,
 ): void {
-  if (element.kind === "text") {
-    element.color = themedColor(element.color, element.colorRole, theme, colorMap);
-    return;
+  if ("font" in element && element.font) mapFont(element.font, colorMap);
+  if ("fill" in element && element.fill) {
+    element.fill.color = mapColor(element.fill.color, colorMap);
+  }
+  if ("stroke" in element && element.stroke) {
+    element.stroke.color = mapColor(element.stroke.color, colorMap);
   }
 
-  if (element.kind === "rect" || element.kind === "ellipse") {
-    element.fill = themedColor(element.fill, element.fillRole, theme, colorMap);
-    if (element.line) {
-      element.line.color = themedColor(
-        element.line.color,
-        element.line.colorRole,
-        theme,
-        colorMap,
-      );
-    }
-    return;
-  }
-
-  if (element.kind === "bullets") {
-    element.color = themedColor(element.color, element.colorRole, theme, colorMap);
-    if (element.bulletColor) {
-      element.bulletColor = themedColor(
-        element.bulletColor,
-        element.bulletColorRole,
-        theme,
-        colorMap,
-      );
-    }
-    return;
-  }
-
-  if (element.kind === "chart") {
-    element.color = themedColor(element.color, element.colorRole, theme, colorMap);
-    if (element.axisColor) {
-      element.axisColor = themedColor(
-        element.axisColor,
-        element.axisColorRole,
-        theme,
-        colorMap,
-      );
-    }
-    if (element.labelColor) {
-      element.labelColor = themedColor(
-        element.labelColor,
-        element.labelColorRole,
-        theme,
-        colorMap,
-      );
-    }
-    element.data.forEach((datum) => {
-      if (datum.color) {
-        datum.color = themedColor(datum.color, datum.colorRole, theme, colorMap);
-      }
+  if (element.type === "text") {
+    element.runs.forEach((run) => {
+      if (run.font) mapFont(run.font, colorMap);
     });
     return;
   }
 
-  if (element.kind === "table") {
-    element.textColor = themedColor(
-      element.textColor,
-      element.textColorRole,
-      theme,
-      colorMap,
-    );
-    element.headerFill = themedColor(
-      element.headerFill,
-      element.headerFillRole,
-      theme,
-      colorMap,
-    );
-    element.headerTextColor = themedColor(
-      element.headerTextColor,
-      element.headerTextColorRole,
-      theme,
-      colorMap,
-    );
-    element.borderColor = themedColor(
-      element.borderColor,
-      element.borderColorRole,
-      theme,
-      colorMap,
-    );
-    if (element.fill) {
-      element.fill = themedColor(element.fill, element.fillRole, theme, colorMap);
-    }
+  if (element.type === "chart") {
+    element.color = mapOptionalColor(element.color, colorMap);
+    element.axisColor = mapOptionalColor(element.axisColor, colorMap);
+    element.labelColor = mapOptionalColor(element.labelColor, colorMap);
+    element.data.forEach((datum) => {
+      datum.color = mapOptionalColor(datum.color, colorMap);
+    });
     return;
   }
 
-  if (element.kind === "svg") {
-    element.svg = mapSvgColors(element.svg, colorMap);
+  if (element.type === "table") {
+    element.columns.forEach((cell) => mapTableCell(cell, colorMap));
+    element.rows.forEach((row) =>
+      row.forEach((cell) => mapTableCell(cell, colorMap)),
+    );
+    return;
   }
+
+  if (element.type === "svg") {
+    element.svg = mapSvgColors(element.svg, colorMap);
+    return;
+  }
+
+  if (element.type === "container") {
+    if (element.child) applyElementTheme(element.child, colorMap);
+    return;
+  }
+
+  if (
+    element.type === "flex" ||
+    element.type === "grid" ||
+    element.type === "group"
+  ) {
+    element.children.forEach((child) => applyElementTheme(child, colorMap));
+    return;
+  }
+
+  if (element.type === "list-view" || element.type === "grid-view") {
+    applyElementTheme(element.item, colorMap);
+  }
+}
+
+function mapFont(
+  font: { color?: string | null | undefined },
+  colorMap: Map<string, string>,
+): void {
+  font.color = mapOptionalColor(font.color, colorMap);
+}
+
+function mapTableCell(cell: TableCell, colorMap: Map<string, string>): void {
+  if (cell.fill) cell.fill.color = mapColor(cell.fill.color, colorMap);
+  if (cell.stroke) cell.stroke.color = mapColor(cell.stroke.color, colorMap);
+  if (cell.font) mapFont(cell.font, colorMap);
 }
 
 function themedColor(
@@ -299,6 +275,13 @@ function themedColor(
 function mapColor(color: string, colorMap: Map<string, string>): string {
   const normalized = color.replace("#", "").toUpperCase();
   return colorMap.get(normalized) ?? color;
+}
+
+function mapOptionalColor(
+  color: string | null | undefined,
+  colorMap: Map<string, string>,
+) {
+  return color ? mapColor(color, colorMap) : color;
 }
 
 function mapSvgColors(svg: string, colorMap: Map<string, string>): string {

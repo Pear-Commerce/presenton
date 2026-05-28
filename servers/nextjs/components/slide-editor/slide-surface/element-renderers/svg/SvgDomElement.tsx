@@ -13,7 +13,7 @@ export function SvgDomElement({
   const svgElements = useMemo(
     () =>
       slide.elements.map((element) =>
-        element.kind === "svg" ? sanitizeSvgMarkup(element.svg) : null,
+        element.type === "svg" ? sanitizeSvgMarkup(element.svg) : null,
       ),
     [slide.elements],
   );
@@ -21,7 +21,7 @@ export function SvgDomElement({
   return (
     <DomElementLayer>
       {slide.elements.map((element, index) =>
-        element.kind === "svg" ? (
+        element.type === "svg" ? (
           <div
             key={index}
             style={{

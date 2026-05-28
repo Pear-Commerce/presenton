@@ -21,20 +21,20 @@ export type KonvaElementRenderProps = ElementCommonProps &
   };
 
 const KONVA_RENDERERS = {
-  rect: ({ element, ...rest }) =>
-    element.kind === "rect" ? (
+  rectangle: ({ element, ...rest }) =>
+    element.type === "rectangle" ? (
       <RectElement element={element} {...rest} />
     ) : null,
   ellipse: ({ element, ...rest }) =>
-    element.kind === "ellipse" ? (
+    element.type === "ellipse" ? (
       <EllipseElement element={element} {...rest} />
     ) : null,
   chart: ({ chartRenderMode, element, ...rest }) =>
-    element.kind === "chart" ? (
+    element.type === "chart" ? (
       <ChartElement element={element} renderMode={chartRenderMode} {...rest} />
     ) : null,
   table: ({ element, onTableCellClick, tableRenderMode, ...rest }) =>
-    element.kind === "table" ? (
+    element.type === "table" ? (
       <TableElement
         element={element}
         onTableCellClick={onTableCellClick}
@@ -43,13 +43,13 @@ const KONVA_RENDERERS = {
       />
     ) : null,
   image: ({ element, ...rest }) =>
-    element.kind === "image" ? (
+    element.type === "image" ? (
       <ImageElement element={element} {...rest} />
     ) : null,
   svg: ({ element, ...rest }) =>
-    element.kind === "svg" ? <SvgElement element={element} {...rest} /> : null,
-  bullets: ({ bulletsRenderMode, element, ...rest }) =>
-    element.kind === "bullets" ? (
+    element.type === "svg" ? <SvgElement element={element} {...rest} /> : null,
+  "text-list": ({ bulletsRenderMode, element, ...rest }) =>
+    element.type === "text-list" ? (
       <BulletsElement
         element={element}
         renderMode={bulletsRenderMode}
@@ -57,7 +57,7 @@ const KONVA_RENDERERS = {
       />
     ) : null,
   text: ({ element, textRenderMode, ...rest }) =>
-    element.kind === "text" ? (
+    element.type === "text" ? (
       <TextElement element={element} renderMode={textRenderMode} {...rest} />
     ) : null,
 } satisfies Record<
@@ -66,6 +66,7 @@ const KONVA_RENDERERS = {
 >;
 
 export function renderKonvaElement(props: KonvaElementRenderProps) {
-  const renderer = getElementDefinition(props.element.kind).renderers.konva;
-  return KONVA_RENDERERS[renderer](props);
+  const renderer = getElementDefinition(props.element.type).renderers
+    .konva as keyof typeof KONVA_RENDERERS;
+  return KONVA_RENDERERS[renderer]?.(props) ?? null;
 }

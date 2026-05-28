@@ -45,7 +45,7 @@ export function ChartDomElement({
   return (
     <DomElementLayer>
       {slide.elements.map((element, index) =>
-        element.kind === "chart" ? (
+        element.type === "chart" ? (
           <ChartCanvas key={index} element={element} scale={scale} />
         ) : null,
       )}
@@ -64,7 +64,10 @@ function ChartCanvas({ element, scale }: { element: ChartEl; scale: number }) {
     [element.data],
   );
   const colors = useMemo(
-    () => element.data.map((datum) => withHash(datum.color ?? element.color)),
+    () =>
+      element.data.map((datum) =>
+        withHash(datum.color ?? element.color ?? "D4A24C"),
+      ),
     [element.color, element.data],
   );
 
@@ -90,7 +93,9 @@ function ChartCanvas({ element, scale }: { element: ChartEl; scale: number }) {
             data: values,
             backgroundColor: isDonut ? colors : colors.map((color) => color),
             borderColor:
-              element.chartType === "line" ? withHash(element.color) : colors,
+              element.chartType === "line"
+                ? withHash(element.color ?? "D4A24C")
+                : colors,
             borderRadius: element.chartType === "bar" ? 4 : 0,
             borderWidth: element.chartType === "line" ? 2 : 1,
             fill: false,

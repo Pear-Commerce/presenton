@@ -33,8 +33,8 @@ function collectDeckAssetSources(deck: Deck): string[] {
   const sources = new Set<string>();
   for (const slide of deck.slides) {
     for (const element of slide.elements) {
-      if (element.kind === "image" && element.data) sources.add(element.data);
-      if (element.kind === "svg") sources.add(svgToDataUri(element.svg));
+      if (element.type === "image" && element.data) sources.add(element.data);
+      if (element.type === "svg") sources.add(svgToDataUri(element.svg));
     }
   }
   return [...sources];

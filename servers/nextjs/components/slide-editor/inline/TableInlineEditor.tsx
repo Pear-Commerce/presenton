@@ -1,5 +1,11 @@
 import type { TableSlideElement } from "../state";
 import { PT_TO_PX, PX_PER_IN, withHash } from "../editorUtils";
+import {
+  elementBox,
+  elementFont,
+  setTableRowsFromStrings,
+  tableRowsAsStrings,
+} from "../lib/element-model";
 import { inlineStyles } from "./inlineStyles";
 
 export function TableInlineEditor({
@@ -19,6 +25,9 @@ export function TableInlineEditor({
   onChange: (index: number, element: TableSlideElement) => void;
   onClose: () => void;
 }) {
+  const box = elementBox(element);
+  const font = elementFont(element);
+
   return (
     <textarea
       autoFocus
@@ -27,7 +36,9 @@ export function TableInlineEditor({
         const nextDraft = event.target.value;
         onDraftChange(nextDraft);
         const rows = tableRowsFromDraft(nextDraft);
-        if (rows.length >= 2) onChange(index, { ...element, rows });
+        if (rows.length >= 2) {
+          onChange(index, setTableRowsFromStrings(element, rows));
+        }
       }}
       onBlur={onClose}
       onKeyDown={(event) => {
@@ -35,13 +46,13 @@ export function TableInlineEditor({
       }}
       style={{
         ...inlineStyles.textEditor,
-        left: element.x * scale,
-        top: element.y * scale,
-        width: element.w * scale,
-        height: element.h * scale,
-        color: withHash(element.textColor),
-        fontFamily: `${element.fontFace ?? "Arial"}, Helvetica, sans-serif`,
-        fontSize: element.fontSize * PT_TO_PX * (scale / PX_PER_IN),
+        left: box.x * scale,
+        top: box.y * scale,
+        width: box.w * scale,
+        height: box.h * scale,
+        color: withHash(font.color),
+        fontFamily: `${font.family}, Helvetica, sans-serif`,
+        fontSize: font.size * PT_TO_PX * (scale / PX_PER_IN),
         lineHeight: 1.35,
       }}
     />
@@ -49,8 +60,8 @@ export function TableInlineEditor({
 }
 
 export function tableDraftFromElement(element: TableSlideElement) {
-  return element.rows
-    .map((row: any) => row.map(formatTableCell).join(", "))
+  return tableRowsAsStrings(element)
+    .map((row) => row.map(formatTableCell).join(", "))
     .join("\n");
 }
 

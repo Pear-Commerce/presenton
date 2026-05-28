@@ -79,7 +79,7 @@ export function ChartToolbar({
         aria-label="Chart color"
         title="Series color"
         type="color"
-        value={withHash(element.color)}
+        value={withHash(element.color ?? "D4A24C")}
         onChange={(event) =>
           onChange(index, {
             ...element,

@@ -1,5 +1,6 @@
 import type { TextSlideElement } from "../state";
 import { withHash, withoutHash } from "../editorUtils";
+import { elementFont, mergeFont } from "../lib/element-model";
 import { InlineToolbar } from "./InlineToolbar";
 import { inlineStyles } from "./inlineStyles";
 
@@ -14,21 +15,19 @@ export function TextToolbar({
   scale: number;
   onChange: (index: number, element: TextSlideElement) => void;
 }) {
+  const font = elementFont(element);
   return (
     <InlineToolbar element={element} scale={scale}>
       <button
         type="button"
         title="Bold"
-        aria-pressed={element.bold ?? false}
+        aria-pressed={font.bold ?? false}
         onClick={() =>
-          onChange(index, {
-            ...element,
-            bold: !(element.bold ?? false),
-          })
+          onChange(index, mergeFont(element, { bold: !(font.bold ?? false) }))
         }
         style={{
           ...inlineStyles.iconButton,
-          ...(element.bold ? inlineStyles.iconButtonActive : {}),
+          ...(font.bold ? inlineStyles.iconButtonActive : {}),
         }}
       >
         B
@@ -36,17 +35,14 @@ export function TextToolbar({
       <button
         type="button"
         title="Italic"
-        aria-pressed={element.italic ?? false}
+        aria-pressed={font.italic ?? false}
         onClick={() =>
-          onChange(index, {
-            ...element,
-            italic: !(element.italic ?? false),
-          })
+          onChange(index, mergeFont(element, { italic: !(font.italic ?? false) }))
         }
         style={{
           ...inlineStyles.iconButton,
           fontStyle: "italic",
-          ...(element.italic ? inlineStyles.iconButtonActive : {}),
+          ...(font.italic ? inlineStyles.iconButtonActive : {}),
         }}
       >
         I
@@ -57,12 +53,9 @@ export function TextToolbar({
         type="number"
         min={6}
         max={360}
-        value={element.fontSize}
+        value={font.size}
         onChange={(event) =>
-          onChange(index, {
-            ...element,
-            fontSize: Number(event.target.value) || element.fontSize,
-          })
+          onChange(index, mergeFont(element, { size: Number(event.target.value) || font.size }))
         }
         style={inlineStyles.numberInput}
       />
@@ -70,12 +63,9 @@ export function TextToolbar({
         aria-label="Text color"
         title="Text color"
         type="color"
-        value={withHash(element.color)}
+        value={withHash(font.color)}
         onChange={(event) =>
-          onChange(index, {
-            ...element,
-            color: withoutHash(event.target.value),
-          })
+          onChange(index, mergeFont(element, { color: withoutHash(event.target.value) }))
         }
         style={inlineStyles.colorInput}
       />

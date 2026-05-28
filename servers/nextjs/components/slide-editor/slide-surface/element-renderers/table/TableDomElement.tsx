@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import type { Slide } from "../../../lib/slide-schema";
 import { PT_TO_PX, PX_PER_IN, withHash } from "../../../editorUtils";
+import { elementFont } from "../../../lib/element-model";
 import type { TableCellSelection } from "../../../state";
 import { DomElementLayer, elementBoxStyle } from "../shared";
 
@@ -18,13 +19,18 @@ export function TableDomElement({
   return (
     <DomElementLayer>
       {slide.elements.map((element, elementIndex) => {
-        if (element.kind !== "table" || editingTableIndex === elementIndex) {
+        if (element.type !== "table" || editingTableIndex === elementIndex) {
           return null;
         }
 
-        const rows = element.rows;
+        const rows = [element.columns, ...element.rows];
         const cols = Math.max(1, ...rows.map((row) => row.length));
-        const borderColor = withHash(element.borderColor);
+        const font = elementFont(element);
+        const borderColor = withHash(
+          element.columns[0]?.stroke?.color ??
+            element.rows[0]?.[0]?.stroke?.color ??
+            "D9E2EF",
+        );
 
         return (
           <table
@@ -33,8 +39,9 @@ export function TableDomElement({
               ...elementBoxStyle(element, scale),
               ...tableStyle,
               borderColor,
-              fontFamily: `${element.fontFace ?? "Arial"}, Helvetica, sans-serif`,
-              fontSize: element.fontSize * PT_TO_PX * (scale / PX_PER_IN),
+              color: withHash(font.color),
+              fontFamily: `${font.family}, Helvetica, sans-serif`,
+              fontSize: font.size * PT_TO_PX * (scale / PX_PER_IN),
             }}
           >
             <tbody>
@@ -46,10 +53,10 @@ export function TableDomElement({
                       selectedCell?.elementIndex === elementIndex &&
                       selectedCell.rowIndex === rowIndex &&
                       selectedCell.colIndex === colIndex;
-                    const cellStyleOverride =
-                      element.cellStyles?.[rowIndex]?.[colIndex];
+                    const cell = row[colIndex] ?? {};
+                    const cellFont = cell.font ?? {};
                     const cellBorderColor = withHash(
-                      cellStyleOverride?.borderColor ?? element.borderColor,
+                      cell.stroke?.color ?? borderColor,
                     );
                     return (
                       <td
@@ -60,26 +67,19 @@ export function TableDomElement({
                           height: `${100 / rows.length}%`,
                           borderColor: cellBorderColor,
                           background: withHash(
-                            cellStyleOverride?.fill ??
-                              (isHeader
-                                ? element.headerFill
-                                : (element.fill ?? "FFFFFF")),
+                            cell.fill?.color ??
+                              (isHeader ? "0B1F3A" : "FFFFFF"),
                           ),
-                          color: withHash(
-                            cellStyleOverride?.textColor ??
-                              (isHeader
-                                ? element.headerTextColor
-                                : element.textColor),
-                          ),
+                          color: withHash(cellFont.color ?? font.color),
                           fontWeight:
-                            (cellStyleOverride?.bold ?? isHeader) ? 700 : 400,
+                            (cellFont.bold ?? font.bold ?? isHeader) ? 700 : 400,
                           textAlign: colIndex === 0 ? "left" : "center",
                           boxShadow: isSelected
                             ? "inset 0 0 0 2px #6f93ff"
                             : undefined,
                         }}
                       >
-                        {row[colIndex] ?? ""}
+                        {cell.text ?? ""}
                       </td>
                     );
                   })}

@@ -23,7 +23,7 @@ type DomOverlayRenderersProps = {
 const DOM_OVERLAY_RENDERERS = {
   svg: ({ scale, slide }) => <SvgDomElement scale={scale} slide={slide} />,
   chart: ({ scale, slide }) => <ChartDomElement scale={scale} slide={slide} />,
-  bullets: ({ editingBulletsIndex, scale, slide }) => (
+  "text-list": ({ editingBulletsIndex, scale, slide }) => (
     <BulletsDomElement
       editingBulletsIndex={editingBulletsIndex}
       scale={scale}

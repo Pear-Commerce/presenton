@@ -1,5 +1,10 @@
 import type { BulletsSlideElement } from "../state";
 import { PT_TO_PX, PX_PER_IN, withHash } from "../editorUtils";
+import {
+  elementBox,
+  elementFont,
+  setTextListStrings,
+} from "../lib/element-model";
 import { inlineStyles } from "./inlineStyles";
 
 export function BulletsInlineEditor({
@@ -19,6 +24,8 @@ export function BulletsInlineEditor({
   onChange: (index: number, element: BulletsSlideElement) => void;
   onClose: () => void;
 }) {
+  const box = elementBox(element);
+  const font = elementFont(element);
   return (
     <textarea
       autoFocus
@@ -31,10 +38,7 @@ export function BulletsInlineEditor({
           .map((item) => item.replace(/^\s*[•*-]\s?/, "").trimEnd())
           .filter((item) => item.trim())
           .slice(0, 8);
-        onChange(index, {
-          ...element,
-          items: items.length > 0 ? items : [" "],
-        });
+        onChange(index, setTextListStrings(element, items.length > 0 ? items : [" "]));
       }}
       onBlur={onClose}
       onKeyDown={(event) => {
@@ -42,14 +46,14 @@ export function BulletsInlineEditor({
       }}
       style={{
         ...inlineStyles.textEditor,
-        left: element.x * scale,
-        top: element.y * scale,
-        width: element.w * scale,
-        height: element.h * scale,
-        color: withHash(element.color),
-        fontFamily: `${element.fontFace ?? "Arial"}, Helvetica, sans-serif`,
-        fontSize: element.fontSize * PT_TO_PX * (scale / PX_PER_IN),
-        lineHeight: element.lineSpacingMultiple ?? 1.3,
+        left: box.x * scale,
+        top: box.y * scale,
+        width: box.w * scale,
+        height: box.h * scale,
+        color: withHash(font.color),
+        fontFamily: `${font.family}, Helvetica, sans-serif`,
+        fontSize: font.size * PT_TO_PX * (scale / PX_PER_IN),
+        lineHeight: font.lineHeight ?? 1.3,
       }}
     />
   );

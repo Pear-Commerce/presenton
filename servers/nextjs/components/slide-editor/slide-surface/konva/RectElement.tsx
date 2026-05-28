@@ -1,6 +1,7 @@
 import { Rect } from "react-konva";
 import type { RectElement as RectEl } from "../../lib/slide-schema";
 import { withHash } from "../../editorUtils";
+import { fillColor } from "../../lib/element-model";
 import {
   konvaCornerRadius,
   rotationProps,
@@ -30,11 +31,11 @@ export function RectElement({
       width={width}
       height={height}
       {...rotationProps(element)}
-      fill={withHash(element.fill)}
+      fill={withHash(fillColor(element.fill))}
       opacity={element.opacity ?? 1}
       cornerRadius={konvaCornerRadius(element, scale)}
-      stroke={element.line ? withHash(element.line.color) : stroke}
-      strokeWidth={element.line ? element.line.width : strokeWidth}
+      stroke={element.stroke ? withHash(element.stroke.color) : stroke}
+      strokeWidth={element.stroke ? element.stroke.width : strokeWidth}
       {...shadowProps(element.shadow, scale)}
       {...events}
     />

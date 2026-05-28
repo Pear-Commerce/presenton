@@ -1,6 +1,9 @@
 import type { SlideElement } from "../lib/slide-schema";
-import { createDefaultElementFromRegistry } from "../registry";
+import {
+  createDefaultElementFromRegistry,
+  type ElementKind,
+} from "../registry";
 
-export function createDefaultElement(kind: SlideElement["kind"]): SlideElement {
-  return createDefaultElementFromRegistry(kind);
+export function createDefaultElement(type: ElementKind): SlideElement {
+  return createDefaultElementFromRegistry(type);
 }

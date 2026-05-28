@@ -1,6 +1,7 @@
 import Konva from "konva";
 import { useEffect, useMemo, useRef } from "react";
 import type { Slide, SlideElement } from "../../../lib/slide-schema";
+import { elementBox } from "../../../lib/element-model";
 
 export function useKonvaSelection({
   interactive,
@@ -31,12 +32,15 @@ export function useKonvaSelection({
     const boxes = selectedIndexes
       .map((index) => slide.elements[index])
       .filter((element): element is SlideElement => Boolean(element))
-      .map((element) => ({
-        x: element.x * scale,
-        y: element.y * scale,
-        width: element.w * scale,
-        height: element.h * scale,
-      }));
+      .map((element) => {
+        const box = elementBox(element);
+        return {
+          x: box.x * scale,
+          y: box.y * scale,
+          width: box.w * scale,
+          height: box.h * scale,
+        };
+      });
     if (boxes.length === 0) return null;
     const minX = Math.min(...boxes.map((box) => box.x));
     const minY = Math.min(...boxes.map((box) => box.y));

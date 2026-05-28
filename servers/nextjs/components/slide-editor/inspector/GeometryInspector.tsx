@@ -1,15 +1,11 @@
 import type { SlideElement } from "../lib/slide-schema";
+import { elementBox } from "../lib/element-model";
 import { styles } from "../editorStyles";
 import { NumberField } from "./InspectorFields";
 
-type GeometryPatch = Pick<SlideElement, "x" | "y" | "w" | "h"> &
-  Partial<
-    Pick<Extract<SlideElement, { opacity?: unknown }>, "opacity" | "rotation">
-  >;
-
 type GeometryInspectorProps = {
   element: SlideElement;
-  onPatch: (patch: Partial<GeometryPatch>) => void;
+  onPatch: (patch: Partial<SlideElement>) => void;
 };
 
 export function GeometryInspector({
@@ -17,29 +13,38 @@ export function GeometryInspector({
   onPatch,
 }: GeometryInspectorProps) {
   const hasOpacity = "opacity" in element;
+  const box = elementBox(element);
 
   return (
     <form onSubmit={(event) => event.preventDefault()} style={styles.form}>
       <div style={styles.grid2}>
         <NumberField
           label="X"
-          value={element.x}
-          onChange={(x) => onPatch({ x })}
+          value={box.x}
+          onChange={(x) =>
+            onPatch({ position: { ...(element.position ?? { y: box.y }), x } })
+          }
         />
         <NumberField
           label="Y"
-          value={element.y}
-          onChange={(y) => onPatch({ y })}
+          value={box.y}
+          onChange={(y) =>
+            onPatch({ position: { ...(element.position ?? { x: box.x }), y } })
+          }
         />
         <NumberField
           label="W"
-          value={element.w}
-          onChange={(w) => onPatch({ w })}
+          value={box.w}
+          onChange={(width) =>
+            onPatch({ size: { ...(element.size ?? { height: box.h }), width } })
+          }
         />
         <NumberField
           label="H"
-          value={element.h}
-          onChange={(h) => onPatch({ h })}
+          value={box.h}
+          onChange={(height) =>
+            onPatch({ size: { ...(element.size ?? { width: box.w }), height } })
+          }
         />
       </div>
 
