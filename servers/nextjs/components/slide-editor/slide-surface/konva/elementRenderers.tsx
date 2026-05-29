@@ -3,6 +3,7 @@ import type { SlideElement } from "../../lib/slide-schema";
 import { getElementDefinition, type KonvaRendererKey } from "../../registry";
 import { BulletsElement } from "./BulletsElement";
 import { ChartElement } from "./ChartElement";
+import { ContainerElement } from "./ContainerElement";
 import { EllipseElement } from "./EllipseElement";
 import { ImageElement } from "./ImageElement";
 import { RectElement } from "./RectElement";
@@ -21,6 +22,12 @@ export type KonvaElementRenderProps = ElementCommonProps &
   };
 
 const KONVA_RENDERERS = {
+  container: ({ element, ...rest }) =>
+    element.type === "container" ? (
+      <ContainerElement element={element} {...rest} />
+    ) : null,
+  flex: () => null,
+  grid: () => null,
   rectangle: ({ element, ...rest }) =>
     element.type === "rectangle" ? (
       <RectElement element={element} {...rest} />

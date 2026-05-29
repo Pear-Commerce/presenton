@@ -1,37 +1,42 @@
 import { useMemo } from "react";
-import type { Slide } from "../../../lib/slide-schema";
+import type { ResolvedLayoutItem } from "../../../lib/layout-resolver";
 import { sanitizeSvgMarkup } from "../../../lib/svg-sanitize";
 import { DomElementLayer, elementBoxStyle } from "../shared";
 
 export function SvgDomElement({
+  items,
   scale,
-  slide,
 }: {
+  items: ResolvedLayoutItem[];
   scale: number;
-  slide: Slide;
 }) {
   const svgElements = useMemo(
     () =>
-      slide.elements.map((element) =>
-        element.type === "svg" ? sanitizeSvgMarkup(element.svg) : null,
+      new Map(
+        items.flatMap((item) =>
+          item.element.type === "svg"
+            ? [[item.path, sanitizeSvgMarkup(item.element.svg)]]
+            : [],
+        ),
       ),
-    [slide.elements],
+    [items],
   );
 
   return (
     <DomElementLayer>
-      {slide.elements.map((element, index) =>
-        element.type === "svg" ? (
+      {items.map((item) => {
+        const element = item.element;
+        return element.type === "svg" ? (
           <div
-            key={index}
+            key={item.path}
             style={{
               ...elementBoxStyle(element, scale),
               overflow: "hidden",
             }}
-            dangerouslySetInnerHTML={{ __html: svgElements[index] ?? "" }}
+            dangerouslySetInnerHTML={{ __html: svgElements.get(item.path) ?? "" }}
           />
-        ) : null,
-      )}
+        ) : null;
+      })}
     </DomElementLayer>
   );
 }

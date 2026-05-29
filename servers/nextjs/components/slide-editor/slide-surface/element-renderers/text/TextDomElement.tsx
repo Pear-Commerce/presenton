@@ -1,6 +1,8 @@
 import { useMemo, type CSSProperties } from "react";
-import type { Slide, TextElement } from "../../../lib/slide-schema";
+import type { TextElement } from "../../../lib/slide-schema";
 import { elementBox, textContent } from "../../../lib/element-model";
+import { rootPath, type ElementPath } from "../../../lib/element-path";
+import type { ResolvedLayoutItem } from "../../../lib/layout-resolver";
 import { fitFontToBox } from "../../../lib/textMeasure";
 import {
   DomElementLayer,
@@ -11,40 +13,48 @@ import {
 
 export function TextDomElement({
   editingTextIndex,
+  editingTextPath,
+  items,
   scale,
-  slide,
 }: {
   editingTextIndex?: number | null;
+  editingTextPath?: ElementPath | null;
+  items: ResolvedLayoutItem[];
   scale: number;
-  slide: Slide;
 }) {
+  const editingPath =
+    editingTextPath ??
+    (editingTextIndex != null ? rootPath(editingTextIndex) : null);
+
   // Pre-compute the effective (post-shrink) fontSize for every text
   // element on this slide. The DOM overlay is what the user actually sees
   // in the interactive editor, so without shrinking here the preview
   // overflows visibly while the export silently fits the text — diverging
   // from PPTX export, PDF export, and presentation mode.
   const effectiveFontSizes = useMemo(() => {
-    const sizes = new Map<number, number>();
-    slide.elements.forEach((element, index) => {
+    const sizes = new Map<string, number>();
+    items.forEach((item) => {
+      const element = item.element;
       if (element.type !== "text") return;
-      sizes.set(index, computeEffectiveFontSize(element));
+      sizes.set(item.path, computeEffectiveFontSize(element));
     });
     return sizes;
-  }, [slide]);
+  }, [items]);
 
   return (
     <DomElementLayer>
-      {slide.elements.map((element, elementIndex) => {
-        if (element.type !== "text" || editingTextIndex === elementIndex) {
+      {items.map((item) => {
+        const element = item.element;
+        if (element.type !== "text" || item.sourcePath === editingPath) {
           return null;
         }
 
         const valign = element.alignment?.vertical ?? "top";
         const effective =
-          effectiveFontSizes.get(elementIndex) ?? element.font?.size;
+          effectiveFontSizes.get(item.path) ?? element.font?.size;
         return (
           <div
-            key={elementIndex}
+            key={item.path}
             style={{
               ...elementBoxStyle(element, scale),
               ...fontStyle(

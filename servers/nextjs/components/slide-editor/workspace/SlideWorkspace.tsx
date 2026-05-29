@@ -1,15 +1,20 @@
 import type { ChangeEventHandler, RefObject } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
+import type { ElementPath } from "../lib/element-path";
 import { SLIDE_H, SLIDE_W } from "../lib/slide-schema";
 import { SlideSurface } from "../slide-surface";
 import {
   activeSlideAtom,
   editingBulletsIndexAtom,
+  editingBulletsPathAtom,
   editingChartIndexAtom,
   editingSvgIndexAtom,
   editingTableIndexAtom,
+  editingTablePathAtom,
   editingTextIndexAtom,
+  editingTextPathAtom,
   editorOpenAtom,
+  selectedPathAtom,
   selectedTableCellAtom,
 } from "../state";
 import { WorkspaceInlineEditors } from "./WorkspaceInlineEditors";
@@ -21,7 +26,7 @@ type SlideWorkspaceProps = {
   stageWidth: number;
   imageUploadInputRef: RefObject<HTMLInputElement | null>;
   onImageUploadChange: ChangeEventHandler<HTMLInputElement>;
-  onEditImage: (index: number) => void;
+  onEditImage: (index: number, path?: ElementPath) => void;
   canInsertSlide?: boolean;
   onInsertSlide?: () => void;
 };
@@ -37,11 +42,15 @@ export function SlideWorkspace({
 }: SlideWorkspaceProps) {
   const activeSlide = useAtomValue(activeSlideAtom);
   const selectedTableCell = useAtomValue(selectedTableCellAtom);
+  const selectedPath = useAtomValue(selectedPathAtom);
   const editingTextIndex = useAtomValue(editingTextIndexAtom);
+  const editingTextPath = useAtomValue(editingTextPathAtom);
   const editingBulletsIndex = useAtomValue(editingBulletsIndexAtom);
+  const editingBulletsPath = useAtomValue(editingBulletsPathAtom);
   const editingChartIndex = useAtomValue(editingChartIndexAtom);
   const editingSvgIndex = useAtomValue(editingSvgIndexAtom);
   const editingTableIndex = useAtomValue(editingTableIndexAtom);
+  const editingTablePath = useAtomValue(editingTablePathAtom);
   const setEditorOpen = useSetAtom(editorOpenAtom);
   const stageScale = stageWidth / SLIDE_W;
   const stageHeight = stageWidth * (SLIDE_H / SLIDE_W);
@@ -74,11 +83,15 @@ export function SlideWorkspace({
           <WorkspaceInlineEditors scale={stageScale} />
           <SlideSurface
             editingBulletsIndex={editingBulletsIndex}
+            editingBulletsPath={editingBulletsPath}
             editingChartIndex={editingChartIndex}
             editingSvgIndex={editingSvgIndex}
             editingTableIndex={editingTableIndex}
+            editingTablePath={editingTablePath}
             editingTextIndex={editingTextIndex}
+            editingTextPath={editingTextPath}
             selectedTableCell={selectedTableCell}
+            selectedPath={selectedPath}
             slide={activeSlide}
             width={stageWidth}
             height={stageHeight}

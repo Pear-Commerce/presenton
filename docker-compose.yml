@@ -203,7 +203,7 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     ports:
-      - "5000:80"
+      - "5001:80"
       # Required for Codex OAuth callback (OpenAI redirects browser directly to localhost:1455)
       - "1455:1455"
     volumes:

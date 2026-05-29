@@ -15,7 +15,8 @@ import {
   Tooltip,
 } from "chart.js";
 import { useEffect, useMemo, useRef } from "react";
-import type { ChartElement as ChartEl, Slide } from "../../../lib/slide-schema";
+import type { ChartElement as ChartEl } from "../../../lib/slide-schema";
+import type { ResolvedLayoutItem } from "../../../lib/layout-resolver";
 import { PX_PER_IN, withHash } from "../../../editorUtils";
 import { DomElementLayer, elementBoxStyle } from "../shared";
 
@@ -36,17 +37,17 @@ Chart.register(
 );
 
 export function ChartDomElement({
+  items,
   scale,
-  slide,
 }: {
+  items: ResolvedLayoutItem[];
   scale: number;
-  slide: Slide;
 }) {
   return (
     <DomElementLayer>
-      {slide.elements.map((element, index) =>
-        element.type === "chart" ? (
-          <ChartCanvas key={index} element={element} scale={scale} />
+      {items.map((item) =>
+        item.element.type === "chart" ? (
+          <ChartCanvas key={item.path} element={item.element} scale={scale} />
         ) : null,
       )}
     </DomElementLayer>

@@ -11,6 +11,18 @@ import {
   type SlideElement,
 } from "../lib/slide-schema";
 import { elementBox, resizeElement } from "../lib/element-model";
+import {
+  deleteElementAtPath,
+  duplicateElementAtPath,
+  getElementAtPath,
+  isRootPath,
+  parentPath,
+  patchElementAtPath,
+  rootIndexFromPath,
+  rootPath,
+  setElementAtPath,
+  type ElementPath,
+} from "../lib/element-path";
 import type { ElementKind } from "../registry";
 import { clamp } from "../editorUtils";
 import {
@@ -21,6 +33,7 @@ import {
   selectedAtom,
   selectedIndexAtom,
   selectedItemsAtom,
+  selectedPathAtom,
   selectedTableCellAtom,
 } from "./atoms";
 import {
@@ -37,19 +50,31 @@ let slideInstanceCounter = 0;
 
 export const selectElementAtom = atom(
   null,
-  (get, set, payload: { index: number; additive?: boolean }) => {
-    const { index, additive = false } = payload;
+  (
+    get,
+    set,
+    payload: { index: number; additive?: boolean; path?: ElementPath },
+  ) => {
+    const { index, additive = false, path } = payload;
     if (index < 0) {
       set(selectedAtom, -1);
+      set(selectedPathAtom, null);
       set(selectedItemsAtom, []);
       set(selectedTableCellAtom, null);
       return;
     }
+    const nextPath = path ?? rootPath(index);
     if (!additive) {
       set(selectedAtom, index);
+      set(selectedPathAtom, nextPath);
       set(selectedItemsAtom, [index]);
       const cell = get(selectedTableCellAtom);
-      if (cell?.elementIndex !== index) set(selectedTableCellAtom, null);
+      const cellPath = cell
+        ? cell.elementPath ?? rootPath(cell.elementIndex)
+        : null;
+      if (cell && (cell.elementIndex !== index || cellPath !== nextPath)) {
+        set(selectedTableCellAtom, null);
+      }
       return;
     }
     const current = get(selectedItemsAtom);
@@ -58,6 +83,8 @@ export const selectElementAtom = atom(
       : [...current, index];
     set(selectedItemsAtom, next);
     set(selectedAtom, next.at(-1) ?? -1);
+    const last = next.at(-1);
+    set(selectedPathAtom, last != null ? rootPath(last) : null);
     const cell = get(selectedTableCellAtom);
     if (cell && !next.includes(cell.elementIndex))
       set(selectedTableCellAtom, null);
@@ -66,6 +93,7 @@ export const selectElementAtom = atom(
 
 export const setSelectionAtom = atom(null, (get, set, next: number) => {
   set(selectedAtom, next);
+  set(selectedPathAtom, next < 0 ? null : rootPath(next));
   set(selectedItemsAtom, next < 0 ? [] : [next]);
   const cell = get(selectedTableCellAtom);
   if (cell?.elementIndex !== next) set(selectedTableCellAtom, null);
@@ -74,6 +102,8 @@ export const setSelectionAtom = atom(null, (get, set, next: number) => {
 export const selectElementsAtom = atom(null, (get, set, indexes: number[]) => {
   set(selectedItemsAtom, indexes);
   set(selectedAtom, indexes.at(-1) ?? -1);
+  const last = indexes.at(-1);
+  set(selectedPathAtom, last != null ? rootPath(last) : null);
   const cell = get(selectedTableCellAtom);
   if (cell && !indexes.includes(cell.elementIndex))
     set(selectedTableCellAtom, null);
@@ -137,6 +167,26 @@ export const updateElementAtom = atom(
   },
 );
 
+export const updateElementAtPathAtom = atom(
+  null,
+  (get, set, payload: { path: ElementPath; element: SlideElement }) => {
+    const activeIdx = get(activeSlideIndexAtom);
+    set(pushHistoryAtom, {
+      tag: `updateElementAtPath:${activeIdx}:${payload.path}`,
+    });
+    set(deckAtom, (draft) => {
+      const slide = draft.slides[activeIdx];
+      const current = getElementAtPath(slide, payload.path);
+      if (!current) return;
+      setElementAtPath(
+        slide,
+        payload.path,
+        replacementForPath(current, payload.element, payload.path),
+      );
+    });
+  },
+);
+
 export const updateElementsAtom = atom(
   null,
   (get, set, updates: Array<{ index: number; element: SlideElement }>) => {
@@ -165,6 +215,7 @@ export const insertSlideAtom = atom(null, (get, set, template: Slide) => {
   });
   set(activeSlideIndexAtom, insertAt);
   set(selectedAtom, -1);
+  set(selectedPathAtom, null);
   set(selectedItemsAtom, []);
   set(selectedTableCellAtom, null);
   set(editorOpenAtom, true);
@@ -208,8 +259,9 @@ export const patchSelectedAtom = atom(
     set(pushHistoryAtom, { tag: `patchSelected:${activeIdx}:${idx}` });
     set(deckAtom, (draft) => {
       const target = draft.slides[activeIdx].elements[idx];
-      if (!target) return;
-      Object.assign(target, patch);
+      const path = get(selectedPathAtom) ?? rootPath(idx);
+      if (!target || !getElementAtPath(draft.slides[activeIdx], path)) return;
+      patchElementAtPath(draft.slides[activeIdx], path, patch);
     });
   },
 );
@@ -227,6 +279,7 @@ export const addElementAtom = atom(
       draft.slides[activeIdx].elements.push(next);
     });
     set(selectedAtom, newIndex);
+    set(selectedPathAtom, rootPath(newIndex));
     set(selectedItemsAtom, [newIndex]);
     set(selectedTableCellAtom, null);
     set(editorOpenAtom, true);
@@ -245,6 +298,7 @@ export const insertElementAtom = atom(
       draft.slides[activeIdx].elements.push(element);
     });
     set(selectedAtom, newIndex);
+    set(selectedPathAtom, rootPath(newIndex));
     set(selectedItemsAtom, [newIndex]);
     set(selectedTableCellAtom, null);
     set(editorOpenAtom, true);
@@ -268,7 +322,9 @@ export const insertElementsAtom = atom(
       if (componentId) arrangeRepeatableComponents(active, componentId);
     });
     const indexes = copies.map((_, offset) => startIndex + offset);
+    const last = indexes.at(-1);
     set(selectedAtom, indexes.at(-1) ?? -1);
+    set(selectedPathAtom, last != null ? rootPath(last) : null);
     set(selectedItemsAtom, indexes);
     set(selectedTableCellAtom, null);
     set(editorOpenAtom, true);
@@ -277,7 +333,8 @@ export const insertElementsAtom = atom(
 
 export const duplicateSelectedAtom = atom(null, (get, set) => {
   const idx = get(selectedIndexAtom);
-  const selected = get(activeSlideAtom)?.elements[idx];
+  const selectedPath = get(selectedPathAtom) ?? rootPath(idx);
+  const selected = getElementAtPath(get(activeSlideAtom), selectedPath);
   if (!selected) return;
   const copy = cloneElement(selected);
   delete copy.componentId;
@@ -289,17 +346,41 @@ export const duplicateSelectedAtom = atom(null, (get, set) => {
     y: clamp(box.y + 0.2, 0, SLIDE_H - box.h),
   });
   const activeIdx = get(activeSlideIndexAtom);
+  let nextPath: ElementPath | null = null;
   set(pushHistoryAtom);
   set(deckAtom, (draft) => {
-    draft.slides[activeIdx].elements.splice(idx + 1, 0, moved);
+    nextPath = duplicateElementAtPath(
+      draft.slides[activeIdx],
+      selectedPath,
+      () => moved,
+    );
   });
-  set(selectedAtom, idx + 1);
-  set(selectedItemsAtom, [idx + 1]);
+  if (nextPath) {
+    const nextRoot = rootIndexFromPath(nextPath);
+    set(selectedAtom, nextRoot);
+    set(selectedPathAtom, nextPath);
+    set(selectedItemsAtom, [nextRoot]);
+  }
   set(selectedTableCellAtom, null);
 });
 
 export const deleteSelectedAtom = atom(null, (get, set) => {
   const slide = get(activeSlideAtom);
+  const selectedPath = get(selectedPathAtom);
+  if (slide && selectedPath && !isRootPath(selectedPath)) {
+    const activeIdx = get(activeSlideIndexAtom);
+    set(pushHistoryAtom);
+    set(deckAtom, (draft) => {
+      deleteElementAtPath(draft.slides[activeIdx], selectedPath);
+    });
+    const parent = parentPath(selectedPath);
+    const parentRoot = rootIndexFromPath(parent);
+    set(selectedAtom, parentRoot);
+    set(selectedPathAtom, parentRoot >= 0 ? parent : null);
+    set(selectedItemsAtom, parentRoot >= 0 ? [parentRoot] : []);
+    set(selectedTableCellAtom, null);
+    return;
+  }
   const selectedItems = get(selectedItemsAtom);
   const selected =
     selectedItems.length > 0 ? selectedItems : [get(selectedIndexAtom)];
@@ -329,6 +410,7 @@ export const deleteSelectedAtom = atom(null, (get, set) => {
   const remainingCount = slide.elements.length - indexes.length;
   if (remainingCount <= 0) {
     set(selectedAtom, -1);
+    set(selectedPathAtom, null);
     set(selectedItemsAtom, []);
     set(selectedTableCellAtom, null);
     return;
@@ -338,6 +420,7 @@ export const deleteSelectedAtom = atom(null, (get, set) => {
     remainingCount - 1,
   );
   set(selectedAtom, nextSelected);
+  set(selectedPathAtom, rootPath(nextSelected));
   set(selectedItemsAtom, [nextSelected]);
   set(selectedTableCellAtom, null);
 });
@@ -361,6 +444,7 @@ export const deleteSelectedComponentRunAtom = atom(null, (get, set) => {
   const nextCount = slide.elements.length - run.indexes.length;
   if (nextCount <= 0) {
     set(selectedAtom, -1);
+    set(selectedPathAtom, null);
     set(selectedItemsAtom, []);
     set(selectedTableCellAtom, null);
     return;
@@ -368,6 +452,7 @@ export const deleteSelectedComponentRunAtom = atom(null, (get, set) => {
 
   const nextIndex = Math.min(run.start, nextCount - 1);
   set(selectedAtom, nextIndex);
+  set(selectedPathAtom, rootPath(nextIndex));
   set(selectedItemsAtom, [nextIndex]);
   set(selectedTableCellAtom, null);
 });
@@ -378,6 +463,19 @@ function cloneElement(element: SlideElement): SlideElement {
 
 function cloneSlide(slide: Slide): Slide {
   return JSON.parse(JSON.stringify(slide)) as Slide;
+}
+
+function replacementForPath(
+  current: SlideElement,
+  next: SlideElement,
+  path: ElementPath,
+): SlideElement {
+  if (isRootPath(path)) return next;
+  return {
+    ...next,
+    position: current.position,
+    size: current.size,
+  } as SlideElement;
 }
 
 function getMovedActiveIndex(active: number, from: number, to: number) {

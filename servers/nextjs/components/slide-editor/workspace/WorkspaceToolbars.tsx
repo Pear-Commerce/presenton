@@ -1,15 +1,17 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import {
-  selectedElementAtom,
+  selectedResolvedElementAtom,
   selectedIndexAtom,
+  selectedPathAtom,
   selectedTableCellAtom,
-  updateElementAtom,
+  updateElementAtPathAtom,
 } from "../state";
+import { rootPath, type ElementPath } from "../lib/element-path";
 import { ElementToolbar } from "./ElementToolbar";
 
 type WorkspaceToolbarsProps = {
   scale: number;
-  onEditImage: (index: number) => void;
+  onEditImage: (index: number, path?: ElementPath) => void;
 };
 
 export function WorkspaceToolbars({
@@ -17,9 +19,10 @@ export function WorkspaceToolbars({
   onEditImage,
 }: WorkspaceToolbarsProps) {
   const selectedIndex = useAtomValue(selectedIndexAtom);
-  const selectedElement = useAtomValue(selectedElementAtom);
+  const selectedPath = useAtomValue(selectedPathAtom);
+  const selectedElement = useAtomValue(selectedResolvedElementAtom);
   const selectedTableCell = useAtomValue(selectedTableCellAtom);
-  const updateElement = useSetAtom(updateElementAtom);
+  const updateElementAtPath = useSetAtom(updateElementAtPathAtom);
 
   if (!selectedElement) return null;
 
@@ -29,7 +32,10 @@ export function WorkspaceToolbars({
       index={selectedIndex}
       scale={scale}
       selectedTableCell={selectedTableCell}
-      onChange={(index, element) => updateElement({ index, element })}
+      path={selectedPath ?? rootPath(selectedIndex)}
+      onChange={(index, element, path) =>
+        updateElementAtPath({ path: path ?? rootPath(index), element })
+      }
       onEditImage={onEditImage}
     />
   );

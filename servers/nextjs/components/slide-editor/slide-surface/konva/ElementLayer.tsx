@@ -8,12 +8,20 @@ import {
   type SlideElement,
 } from "../../lib/slide-schema";
 import { elementBox, resizeElement } from "../../lib/element-model";
+import { rootPath, type ElementPath } from "../../lib/element-path";
+import {
+  flattenResolvedLayoutNode,
+  isLayoutElement,
+  resolveElementLayoutTree,
+  resolveSlideLayout,
+  type ResolvedLayoutItem,
+} from "../../lib/layout-resolver";
 import { textElementOverflows } from "../../lib/textMeasure";
 import { clamp } from "../../editorUtils";
 import { getComponentRun } from "../../state";
 import { useGroupDrag } from "./hooks/useGroupDrag";
 import { KonvaElement } from "./KonvaElement";
-import { SELECTION_STROKE } from "./types";
+import { SELECTION_STROKE, type ElementEvents } from "./types";
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type PressPoint = { x: number; y: number };
@@ -40,6 +48,7 @@ export function ElementLayer({
   bulletsRenderMode = "canvas",
   chartRenderMode = "canvas",
   onChange,
+  onChangeAtPath,
   onChangeMany,
   onDelete,
   onEditBullets,
@@ -55,6 +64,7 @@ export function ElementLayer({
   scale,
   selectedBounds,
   selectedIndexes,
+  selectedPath,
   slide,
   tableRenderMode = "canvas",
   textRenderMode = "canvas",
@@ -73,27 +83,30 @@ export function ElementLayer({
   bulletsRenderMode?: "canvas" | "proxy";
   chartRenderMode?: "canvas" | "proxy";
   onChange?: (index: number, element: SlideElement) => void;
+  onChangeAtPath?: (path: ElementPath, element: SlideElement) => void;
   onChangeMany?: (
     updates: Array<{ index: number; element: SlideElement }>,
   ) => void;
   onDelete?: () => void;
-  onEditBullets?: (index: number) => void;
-  onEditChart?: (index: number) => void;
+  onEditBullets?: (index: number, path?: ElementPath) => void;
+  onEditChart?: (index: number, path?: ElementPath) => void;
   onEditComponentRun?: (indexes: number[]) => void;
-  onEditImage?: (index: number) => void;
-  onEditSvg?: (index: number) => void;
-  onEditTable?: (index: number) => void;
-  onEditText?: (index: number) => void;
-  onSelect?: (index: number, additive?: boolean) => void;
+  onEditImage?: (index: number, path?: ElementPath) => void;
+  onEditSvg?: (index: number, path?: ElementPath) => void;
+  onEditTable?: (index: number, path?: ElementPath) => void;
+  onEditText?: (index: number, path?: ElementPath) => void;
+  onSelect?: (index: number, additive?: boolean, path?: ElementPath) => void;
   onSelectMany?: (indexes: number[]) => void;
   onSelectTableCell?: (
     index: number,
     rowIndex: number,
     colIndex: number,
+    path?: ElementPath,
   ) => void;
   scale: number;
   selectedBounds: Bounds | null;
   selectedIndexes: number[];
+  selectedPath?: ElementPath | null;
   slide: Slide;
   tableRenderMode?: "canvas" | "proxy";
   textRenderMode?: "canvas" | "proxy";
@@ -115,9 +128,9 @@ export function ElementLayer({
   const overflowingIndices = useMemo(() => {
     if (!interactive) return null;
     const out = new Set<number>();
-    slide.elements.forEach((element, index) => {
-      if (element.type === "text" && textElementOverflows(element)) {
-        out.add(index);
+    resolveSlideLayout(slide).forEach((item) => {
+      if (item.element.type === "text" && textElementOverflows(item.element)) {
+        out.add(item.rootIndex);
       }
     });
     return out;
@@ -222,8 +235,13 @@ export function ElementLayer({
     return true;
   };
 
-  const commonEvents = (index: number, el: SlideElement) => ({
-    draggable: interactive,
+  const commonEvents = (
+    index: number,
+    el: SlideElement,
+    path: ElementPath = rootPath(index),
+    nested = false,
+  ) => ({
+    draggable: interactive && !nested,
     onClick: (event: Konva.KonvaEventObject<MouseEvent>) => {
       if (shouldSuppressSelect(index)) {
         event.cancelBubble = true;
@@ -232,6 +250,7 @@ export function ElementLayer({
       onSelect?.(
         index,
         event.evt.shiftKey || event.evt.metaKey || event.evt.ctrlKey,
+        path,
       );
       return true;
     },
@@ -246,20 +265,20 @@ export function ElementLayer({
       )
         return;
       event.cancelBubble = true;
-      onSelect?.(index);
-      if (el.type === "text") onEditText?.(index);
-      if (el.type === "text-list") onEditBullets?.(index);
-      if (el.type === "chart") onEditChart?.(index);
-      if (el.type === "image") onEditImage?.(index);
-      if (el.type === "svg") onEditSvg?.(index);
-      if (el.type === "table") onEditTable?.(index);
+      onSelect?.(index, false, path);
+      if (el.type === "text") onEditText?.(index, path);
+      if (el.type === "text-list") onEditBullets?.(index, path);
+      if (el.type === "chart") onEditChart?.(index, path);
+      if (el.type === "image") onEditImage?.(index, path);
+      if (el.type === "svg") onEditSvg?.(index, path);
+      if (el.type === "table") onEditTable?.(index, path);
     },
     onTap: (event: Konva.KonvaEventObject<TouchEvent>) => {
       if (shouldSuppressSelect(index)) {
         event.cancelBubble = true;
         return false;
       }
-      onSelect?.(index);
+      onSelect?.(index, false, path);
       return true;
     },
     onMouseDown: (event: Konva.KonvaEventObject<MouseEvent>) => {
@@ -292,13 +311,12 @@ export function ElementLayer({
       const rawY = event.target.y() / scale;
       const nextX = el.type === "ellipse" ? rawX - box.w / 2 : rawX;
       const nextY = el.type === "ellipse" ? rawY - box.h / 2 : rawY;
-      onChange?.(
-        index,
-        resizeElement(el, {
-          x: clamp(nextX, 0, SLIDE_W - box.w),
-          y: clamp(nextY, 0, SLIDE_H - box.h),
-        }),
-      );
+      const next = resizeElement(el, {
+        x: clamp(nextX, 0, SLIDE_W - box.w),
+        y: clamp(nextY, 0, SLIDE_H - box.h),
+      });
+      if (path === rootPath(index)) onChange?.(index, next);
+      else onChangeAtPath?.(path, next);
     },
     onTransformEnd: (event: Konva.KonvaEventObject<Event>) => {
       const node = event.target;
@@ -312,53 +330,80 @@ export function ElementLayer({
       const nextY = el.type === "ellipse" ? rawY - nextH / 2 : rawY;
       node.scaleX(1);
       node.scaleY(1);
-      onChange?.(
-        index,
-        {
-          ...resizeElement(el, {
-            x: clamp(nextX, 0, SLIDE_W - nextW),
-            y: clamp(nextY, 0, SLIDE_H - nextH),
-            w: clamp(nextW, 0.1, SLIDE_W),
-            h: clamp(nextH, 0.1, SLIDE_H),
-          }),
-          rotation: node.rotation(),
-        } as SlideElement,
-      );
+      const next = {
+        ...resizeElement(el, {
+          x: clamp(nextX, 0, SLIDE_W - nextW),
+          y: clamp(nextY, 0, SLIDE_H - nextH),
+          w: clamp(nextW, 0.1, SLIDE_W),
+          h: clamp(nextH, 0.1, SLIDE_H),
+        }),
+        rotation: node.rotation(),
+      } as SlideElement;
+      if (path === rootPath(index)) onChange?.(index, next);
+      else onChangeAtPath?.(path, next);
     },
   });
 
   return (
     <>
-      {slide.elements.map((el, index) => (
-        <KonvaElement
-          key={index}
-          element={el}
-          bulletsRenderMode={bulletsRenderMode}
-          chartRenderMode={chartRenderMode}
-          index={index}
-          scale={scale}
-          tableRenderMode={tableRenderMode}
-          textRenderMode={textRenderMode}
-          selected={selectedIndexes.includes(index)}
-          editing={
-            editingTextIndex === index ||
-            editingBulletsIndex === index ||
-            editingChartIndex === index ||
-            editingSvgIndex === index ||
-            editingTableIndex === index
-          }
-          onTableCellClick={
-            el.type === "table"
-              ? (rowIndex, colIndex) =>
-                  onSelectTableCell?.(index, rowIndex, colIndex)
-              : undefined
-          }
-          setRef={(node) => {
-            nodeRefs.current[index] = node;
-          }}
-          events={commonEvents(index, el)}
-        />
-      ))}
+      {slide.elements.map((el, index) =>
+        isLayoutElement(el) ? (
+          <LayoutRootElement
+            key={index}
+            element={el}
+            bulletsRenderMode={bulletsRenderMode}
+            chartRenderMode={chartRenderMode}
+            index={index}
+            scale={scale}
+            tableRenderMode={tableRenderMode}
+            textRenderMode={textRenderMode}
+            selected={selectedPath === rootPath(index)}
+            selectedPath={selectedPath}
+            setRef={(node) => {
+              nodeRefs.current[index] = node;
+            }}
+            events={commonEvents(index, el)}
+            onSelectTableCell={onSelectTableCell}
+            nestedEvents={(item) =>
+              commonEvents(index, item.element, item.sourcePath, true)
+            }
+          />
+        ) : (
+          <KonvaElement
+            key={index}
+            element={el}
+            bulletsRenderMode={bulletsRenderMode}
+            chartRenderMode={chartRenderMode}
+            index={index}
+            scale={scale}
+            tableRenderMode={tableRenderMode}
+            textRenderMode={textRenderMode}
+            selected={selectedPath === rootPath(index)}
+            editing={
+              editingTextIndex === index ||
+              editingBulletsIndex === index ||
+              editingChartIndex === index ||
+              editingSvgIndex === index ||
+              editingTableIndex === index
+            }
+            onTableCellClick={
+              el.type === "table"
+                ? (rowIndex, colIndex) =>
+                    onSelectTableCell?.(
+                      index,
+                      rowIndex,
+                      colIndex,
+                      rootPath(index),
+                    )
+                : undefined
+            }
+            setRef={(node) => {
+              nodeRefs.current[index] = node;
+            }}
+            events={commonEvents(index, el)}
+          />
+        ),
+      )}
       {overflowingIndices
         ? slide.elements.map((el, index) => {
             if (!overflowingIndices.has(index)) return null;
@@ -495,6 +540,167 @@ export function ElementLayer({
         />
       ) : null}
     </>
+  );
+}
+
+const passiveEvents: ElementEvents = {
+  draggable: false,
+  onClick: () => false,
+  onTap: () => false,
+  onDragStart: () => undefined,
+  onDragMove: () => undefined,
+  onDragEnd: () => undefined,
+  onTransformEnd: () => undefined,
+};
+
+function LayoutRootElement({
+  bulletsRenderMode,
+  chartRenderMode,
+  element,
+  events,
+  index,
+  nestedEvents,
+  onSelectTableCell,
+  scale,
+  selected,
+  selectedPath,
+  setRef,
+  tableRenderMode,
+  textRenderMode,
+}: {
+  bulletsRenderMode?: "canvas" | "proxy";
+  chartRenderMode?: "canvas" | "proxy";
+  element: SlideElement;
+  events: ElementEvents;
+  index: number;
+  nestedEvents: (item: ResolvedLayoutItem) => ElementEvents;
+  onSelectTableCell?: (
+    index: number,
+    rowIndex: number,
+    colIndex: number,
+    path?: ElementPath,
+  ) => void;
+  scale: number;
+  selected: boolean;
+  selectedPath?: ElementPath | null;
+  setRef: (node: Konva.Node | null) => void;
+  tableRenderMode?: "canvas" | "proxy";
+  textRenderMode?: "canvas" | "proxy";
+}) {
+  const box = elementBox(element);
+  const resolved = flattenResolvedLayoutNode(
+    resolveElementLayoutTree(element, {
+      rootIndex: index,
+      path: String(index),
+      parentPath: null,
+      depth: 0,
+      mode: "absolute",
+    }),
+  ).filter((item) => item.path !== String(index));
+  const x = box.x * scale;
+  const y = box.y * scale;
+  const width = box.w * scale;
+  const height = box.h * scale;
+
+  return (
+    <>
+      {element.type === "container" && (element.fill || element.stroke) ? (
+        <KonvaElement
+          element={element}
+          index={index}
+          scale={scale}
+          selected={false}
+          setRef={() => undefined}
+          events={passiveEvents}
+        />
+      ) : null}
+      <Rect
+        ref={setRef}
+        name={`element-${index}`}
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        fill="rgba(0,0,0,0)"
+        {...events}
+      />
+      {resolved.map((item) => (
+        <ResolvedKonvaItem
+          key={item.path}
+          item={item}
+          bulletsRenderMode={bulletsRenderMode}
+          chartRenderMode={chartRenderMode}
+          index={index}
+          scale={scale}
+          selected={selectedPath === item.sourcePath}
+          tableRenderMode={tableRenderMode}
+          textRenderMode={textRenderMode}
+          events={nestedEvents(item)}
+          onTableCellClick={
+            item.element.type === "table"
+              ? (rowIndex, colIndex) =>
+                  onSelectTableCell?.(
+                    index,
+                    rowIndex,
+                    colIndex,
+                    item.sourcePath,
+                  )
+              : undefined
+          }
+        />
+      ))}
+      {selected ? (
+        <Rect
+          x={x}
+          y={y}
+          width={width}
+          height={height}
+          stroke={SELECTION_STROKE}
+          strokeWidth={1.5}
+          listening={false}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function ResolvedKonvaItem({
+  bulletsRenderMode,
+  chartRenderMode,
+  events,
+  index,
+  item,
+  onTableCellClick,
+  scale,
+  selected,
+  tableRenderMode,
+  textRenderMode,
+}: {
+  bulletsRenderMode?: "canvas" | "proxy";
+  chartRenderMode?: "canvas" | "proxy";
+  events: ElementEvents;
+  index: number;
+  item: ResolvedLayoutItem;
+  onTableCellClick?: (rowIndex: number, colIndex: number) => void;
+  scale: number;
+  selected: boolean;
+  tableRenderMode?: "canvas" | "proxy";
+  textRenderMode?: "canvas" | "proxy";
+}) {
+  return (
+    <KonvaElement
+      element={item.element}
+      bulletsRenderMode={bulletsRenderMode}
+      chartRenderMode={chartRenderMode}
+      index={index}
+      scale={scale}
+      tableRenderMode={tableRenderMode}
+      textRenderMode={textRenderMode}
+      selected={selected}
+      onTableCellClick={onTableCellClick}
+      setRef={() => undefined}
+      events={events}
+    />
   );
 }
 

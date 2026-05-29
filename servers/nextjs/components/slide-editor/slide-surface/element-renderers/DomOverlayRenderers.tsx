@@ -1,5 +1,11 @@
 import type { ReactNode } from "react";
+import { useMemo } from "react";
 import type { Slide } from "../../lib/slide-schema";
+import {
+  resolveSlideLayout,
+  type ResolvedLayoutItem,
+} from "../../lib/layout-resolver";
+import type { ElementPath } from "../../lib/element-path";
 import {
   getDomOverlayDefinitions,
   type DomOverlayRendererKey,
@@ -13,36 +19,51 @@ import { TextDomElement } from "./text";
 
 type DomOverlayRenderersProps = {
   editingBulletsIndex?: number | null;
+  editingBulletsPath?: ElementPath | null;
   editingTableIndex?: number | null;
+  editingTablePath?: ElementPath | null;
   editingTextIndex?: number | null;
+  editingTextPath?: ElementPath | null;
+  items?: ResolvedLayoutItem[];
   scale: number;
   selectedTableCell?: TableCellSelection | null;
   slide: Slide;
 };
 
 const DOM_OVERLAY_RENDERERS = {
-  svg: ({ scale, slide }) => <SvgDomElement scale={scale} slide={slide} />,
-  chart: ({ scale, slide }) => <ChartDomElement scale={scale} slide={slide} />,
-  "text-list": ({ editingBulletsIndex, scale, slide }) => (
+  svg: ({ items = [], scale }) => <SvgDomElement items={items} scale={scale} />,
+  chart: ({ items = [], scale }) => (
+    <ChartDomElement items={items} scale={scale} />
+  ),
+  "text-list": ({ editingBulletsIndex, editingBulletsPath, items = [], scale }) => (
     <BulletsDomElement
       editingBulletsIndex={editingBulletsIndex}
+      editingBulletsPath={editingBulletsPath}
+      items={items}
       scale={scale}
-      slide={slide}
     />
   ),
-  text: ({ editingTextIndex, scale, slide }) => (
+  text: ({ editingTextIndex, editingTextPath, items = [], scale }) => (
     <TextDomElement
       editingTextIndex={editingTextIndex}
+      editingTextPath={editingTextPath}
+      items={items}
       scale={scale}
-      slide={slide}
     />
   ),
-  table: ({ editingTableIndex, scale, selectedTableCell, slide }) => (
+  table: ({
+    editingTableIndex,
+    editingTablePath,
+    items = [],
+    scale,
+    selectedTableCell,
+  }) => (
     <TableDomElement
       editingTableIndex={editingTableIndex}
+      editingTablePath={editingTablePath}
+      items={items}
       scale={scale}
       selectedCell={selectedTableCell}
-      slide={slide}
     />
   ),
 } satisfies Record<
@@ -51,13 +72,19 @@ const DOM_OVERLAY_RENDERERS = {
 >;
 
 export function DomOverlayRenderers(props: DomOverlayRenderersProps) {
+  const items = useMemo(() => resolveSlideLayout(props.slide), [props.slide]);
   return (
     <>
       {getDomOverlayDefinitions().map((definition) => {
         const renderer = definition.renderers.domOverlay;
         if (renderer == null) return null;
         return (
-          <DomOverlayRenderer key={renderer} renderer={renderer} {...props} />
+          <DomOverlayRenderer
+            key={renderer}
+            renderer={renderer}
+            {...props}
+            items={items}
+          />
         );
       })}
     </>

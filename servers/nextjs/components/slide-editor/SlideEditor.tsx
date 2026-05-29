@@ -45,6 +45,7 @@ import {
   redoAtom,
   selectedAtom,
   selectedItemsAtom,
+  selectedPathAtom,
   selectedTableCellAtom,
   undoAtom,
 } from "./state";
@@ -101,6 +102,7 @@ function SlideEditorBody({
   const setDeck = useSetAtom(deckAtom);
   const setActiveSlideIndex = useSetAtom(activeSlideIndexAtom);
   const setSelected = useSetAtom(selectedAtom);
+  const setSelectedPath = useSetAtom(selectedPathAtom);
   const setSelectedItems = useSetAtom(selectedItemsAtom);
   const setSelectedTableCell = useSetAtom(selectedTableCellAtom);
   const [editorOpen, setEditorOpen] = useAtom(editorOpenAtom);
@@ -136,6 +138,7 @@ function SlideEditorBody({
     setDeck(structuredClone(nextTemplate.deck));
     setActiveSlideIndex(0);
     setSelected(-1);
+    setSelectedPath(null);
     setSelectedItems([]);
     setSelectedTableCell(null);
     setEditorOpen(false);

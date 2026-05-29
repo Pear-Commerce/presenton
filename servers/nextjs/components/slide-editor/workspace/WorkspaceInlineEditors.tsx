@@ -10,19 +10,25 @@ import {
   editingBulletsDraftAtom,
   editingBulletsElementAtom,
   editingBulletsIndexAtom,
+  editingBulletsPathAtom,
   editingChartDraftAtom,
   editingChartElementAtom,
   editingChartIndexAtom,
+  editingChartPathAtom,
   editingSvgDraftAtom,
   editingSvgElementAtom,
   editingSvgIndexAtom,
+  editingSvgPathAtom,
   editingTableDraftAtom,
   editingTableElementAtom,
   editingTableIndexAtom,
+  editingTablePathAtom,
   editingTextElementAtom,
   editingTextIndexAtom,
-  updateElementAtom,
+  editingTextPathAtom,
+  updateElementAtPathAtom,
 } from "../state";
+import { rootPath } from "../lib/element-path";
 
 type WorkspaceInlineEditorsProps = {
   scale: number;
@@ -35,8 +41,12 @@ export function WorkspaceInlineEditors({ scale }: WorkspaceInlineEditorsProps) {
   const editingChartElement = useAtomValue(editingChartElementAtom);
   const editingSvgElement = useAtomValue(editingSvgElementAtom);
   const [editingTextIndex, setEditingTextIndex] = useAtom(editingTextIndexAtom);
+  const [editingTextPath, setEditingTextPath] = useAtom(editingTextPathAtom);
   const [editingBulletsIndex, setEditingBulletsIndex] = useAtom(
     editingBulletsIndexAtom,
+  );
+  const [editingBulletsPath, setEditingBulletsPath] = useAtom(
+    editingBulletsPathAtom,
   );
   const [editingBulletsDraft, setEditingBulletsDraft] = useAtom(
     editingBulletsDraftAtom,
@@ -44,18 +54,21 @@ export function WorkspaceInlineEditors({ scale }: WorkspaceInlineEditorsProps) {
   const [editingTableIndex, setEditingTableIndex] = useAtom(
     editingTableIndexAtom,
   );
+  const [editingTablePath, setEditingTablePath] = useAtom(editingTablePathAtom);
   const [editingTableDraft, setEditingTableDraft] = useAtom(
     editingTableDraftAtom,
   );
   const [editingChartIndex, setEditingChartIndex] = useAtom(
     editingChartIndexAtom,
   );
+  const [editingChartPath, setEditingChartPath] = useAtom(editingChartPathAtom);
   const [editingChartDraft, setEditingChartDraft] = useAtom(
     editingChartDraftAtom,
   );
   const [editingSvgIndex, setEditingSvgIndex] = useAtom(editingSvgIndexAtom);
+  const [editingSvgPath, setEditingSvgPath] = useAtom(editingSvgPathAtom);
   const [editingSvgDraft, setEditingSvgDraft] = useAtom(editingSvgDraftAtom);
-  const updateElement = useSetAtom(updateElementAtom);
+  const updateElementAtPath = useSetAtom(updateElementAtPathAtom);
 
   return (
     <>
@@ -64,8 +77,16 @@ export function WorkspaceInlineEditors({ scale }: WorkspaceInlineEditorsProps) {
           element={editingTextElement}
           index={editingTextIndex}
           scale={scale}
-          onChange={(index, element) => updateElement({ index, element })}
-          onClose={() => setEditingTextIndex(null)}
+          onChange={(index, element) =>
+            updateElementAtPath({
+              path: editingTextPath ?? rootPath(index),
+              element,
+            })
+          }
+          onClose={() => {
+            setEditingTextIndex(null);
+            setEditingTextPath(null);
+          }}
         />
       ) : null}
       {editingBulletsElement && editingBulletsIndex != null ? (
@@ -75,9 +96,15 @@ export function WorkspaceInlineEditors({ scale }: WorkspaceInlineEditorsProps) {
           scale={scale}
           draft={editingBulletsDraft}
           onDraftChange={setEditingBulletsDraft}
-          onChange={(index, element) => updateElement({ index, element })}
+          onChange={(index, element) =>
+            updateElementAtPath({
+              path: editingBulletsPath ?? rootPath(index),
+              element,
+            })
+          }
           onClose={() => {
             setEditingBulletsIndex(null);
+            setEditingBulletsPath(null);
             setEditingBulletsDraft("");
           }}
         />
@@ -89,9 +116,15 @@ export function WorkspaceInlineEditors({ scale }: WorkspaceInlineEditorsProps) {
           scale={scale}
           draft={editingTableDraft}
           onDraftChange={setEditingTableDraft}
-          onChange={(index, element) => updateElement({ index, element })}
+          onChange={(index, element) =>
+            updateElementAtPath({
+              path: editingTablePath ?? rootPath(index),
+              element,
+            })
+          }
           onClose={() => {
             setEditingTableIndex(null);
+            setEditingTablePath(null);
             setEditingTableDraft("");
           }}
         />
@@ -103,9 +136,15 @@ export function WorkspaceInlineEditors({ scale }: WorkspaceInlineEditorsProps) {
           scale={scale}
           draft={editingChartDraft}
           onDraftChange={setEditingChartDraft}
-          onChange={(index, element) => updateElement({ index, element })}
+          onChange={(index, element) =>
+            updateElementAtPath({
+              path: editingChartPath ?? rootPath(index),
+              element,
+            })
+          }
           onClose={() => {
             setEditingChartIndex(null);
+            setEditingChartPath(null);
             setEditingChartDraft("");
           }}
         />
@@ -117,9 +156,15 @@ export function WorkspaceInlineEditors({ scale }: WorkspaceInlineEditorsProps) {
           scale={scale}
           draft={editingSvgDraft}
           onDraftChange={setEditingSvgDraft}
-          onChange={(index, element) => updateElement({ index, element })}
+          onChange={(index, element) =>
+            updateElementAtPath({
+              path: editingSvgPath ?? rootPath(index),
+              element,
+            })
+          }
           onClose={() => {
             setEditingSvgIndex(null);
+            setEditingSvgPath(null);
             setEditingSvgDraft("");
           }}
         />

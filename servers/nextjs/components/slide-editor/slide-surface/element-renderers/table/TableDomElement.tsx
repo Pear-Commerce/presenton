@@ -1,25 +1,33 @@
 import type { CSSProperties } from "react";
-import type { Slide } from "../../../lib/slide-schema";
 import { PT_TO_PX, PX_PER_IN, withHash } from "../../../editorUtils";
 import { elementFont } from "../../../lib/element-model";
+import { rootPath, type ElementPath } from "../../../lib/element-path";
+import type { ResolvedLayoutItem } from "../../../lib/layout-resolver";
 import type { TableCellSelection } from "../../../state";
 import { DomElementLayer, elementBoxStyle } from "../shared";
 
 export function TableDomElement({
   editingTableIndex,
+  editingTablePath,
+  items,
   scale,
   selectedCell,
-  slide,
 }: {
   editingTableIndex?: number | null;
+  editingTablePath?: ElementPath | null;
+  items: ResolvedLayoutItem[];
   scale: number;
   selectedCell?: TableCellSelection | null;
-  slide: Slide;
 }) {
+  const editingPath =
+    editingTablePath ??
+    (editingTableIndex != null ? rootPath(editingTableIndex) : null);
+
   return (
     <DomElementLayer>
-      {slide.elements.map((element, elementIndex) => {
-        if (element.type !== "table" || editingTableIndex === elementIndex) {
+      {items.map((item) => {
+        const element = item.element;
+        if (element.type !== "table" || item.sourcePath === editingPath) {
           return null;
         }
 
@@ -34,7 +42,7 @@ export function TableDomElement({
 
         return (
           <table
-            key={elementIndex}
+            key={item.path}
             style={{
               ...elementBoxStyle(element, scale),
               ...tableStyle,
@@ -49,8 +57,14 @@ export function TableDomElement({
                 <tr key={rowIndex}>
                   {Array.from({ length: cols }).map((_, colIndex) => {
                     const isHeader = rowIndex === 0;
+                    const selectedCellPath =
+                      selectedCell?.elementPath ??
+                      (selectedCell
+                        ? rootPath(selectedCell.elementIndex)
+                        : null);
                     const isSelected =
-                      selectedCell?.elementIndex === elementIndex &&
+                      selectedCell != null &&
+                      selectedCellPath === item.sourcePath &&
                       selectedCell.rowIndex === rowIndex &&
                       selectedCell.colIndex === colIndex;
                     const cell = row[colIndex] ?? {};

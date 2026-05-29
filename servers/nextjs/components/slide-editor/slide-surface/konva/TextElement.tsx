@@ -34,7 +34,7 @@ export function TextElement({
   const font = elementFont(element);
   const effectiveFontSizePt = useMemo(
     () => fitFontToBox(element, box.h),
-    [element],
+    [box.h, element],
   );
   const fontSize = effectiveFontSizePt * PT_TO_PX * (scale / PX_PER_IN);
   const verticalAlign = element.alignment?.vertical ?? "top";

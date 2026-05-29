@@ -1,1536 +1,1141 @@
-import { SLIDE_H, type Deck, type Slide, type SlideElement } from "../lib/slide-schema";
+import {
+  type Deck,
+  type Slide,
+  type SlideElement,
+  type TableCell,
+} from "../lib/slide-schema";
 
-// ── Palette ─────────────────────────────────────────────────────────────
-const NAVY = "0B1F3A";
-const DEEP = "071425";
-const BLUE = "75AADB";
-const BLUE_DK = "3E78B2";
-const GOLD = "D4A24C";
-const OFF_WHITE = "F4F6FA";
-const PAPER = "FFFFFF";
-const INK = "1A2B45";
-const MUTED = "6A7894";
-const MUTED_DK = "9AA7BD";
-
-// Arial renders the same in Google Slides, PowerPoint Web, Keynote, and on
-// Windows/macOS. Helvetica isn't bundled with Google's renderer and gets
-// substituted with a wider face, which breaks our hand-tuned line wraps.
 const SANS = "Arial";
 
-const ORBIT_SVG = `<svg viewBox="0 0 1000 562" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
-  <defs>
-    <radialGradient id="orbitGlow" cx="50%" cy="50%" r="60%">
-      <stop offset="0%" stop-color="#75AADB" stop-opacity="0.28"/>
-      <stop offset="55%" stop-color="#0B1F3A" stop-opacity="0.1"/>
-      <stop offset="100%" stop-color="#071425" stop-opacity="0"/>
-    </radialGradient>
-    <filter id="softGlow"><feGaussianBlur stdDeviation="5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-  </defs>
-  <rect width="1000" height="562" fill="url(#orbitGlow)"/>
-  <g fill="none" stroke="#75AADB" stroke-opacity="0.28">
-    <ellipse cx="510" cy="278" rx="360" ry="118"/>
-    <ellipse cx="510" cy="278" rx="310" ry="88" transform="rotate(-18 510 278)"/>
-    <ellipse cx="510" cy="278" rx="250" ry="62" transform="rotate(24 510 278)"/>
+const INK = "172033";
+const NAVY = "0B1F3A";
+const DEEP = "071425";
+const PAPER = "FFFFFF";
+const MIST = "F4F7FB";
+const LINE = "D7E0EC";
+const MUTED = "66758D";
+const BLUE = "3E78B2";
+const CYAN = "5CC8D7";
+const AMBER = "D4A24C";
+const CORAL = "E46D5B";
+const GREEN = "3FA773";
+const LIME = "A4C957";
+const LAVENDER = "8D7CF6";
+
+const TOTAL = 12;
+
+const GRID_SVG = `<svg viewBox="0 0 900 520" xmlns="http://www.w3.org/2000/svg">
+  <rect width="900" height="520" rx="36" fill="#071425"/>
+  <g fill="none" stroke="#5CC8D7" stroke-opacity="0.35" stroke-width="2">
+    <path d="M90 92h720M90 204h720M90 316h720M90 428h720"/>
+    <path d="M90 92v336M270 92v336M450 92v336M630 92v336M810 92v336"/>
   </g>
-  <g stroke="#D4A24C" stroke-width="3" stroke-opacity="0.8" filter="url(#softGlow)">
-    <line x1="205" y1="262" x2="365" y2="198"/>
-    <line x1="365" y1="198" x2="520" y2="284"/>
-    <line x1="520" y1="284" x2="694" y2="214"/>
-    <line x1="520" y1="284" x2="758" y2="344"/>
-    <line x1="365" y1="198" x2="418" y2="398"/>
-  </g>
-  <g filter="url(#softGlow)">
-    <circle cx="205" cy="262" r="12" fill="#D4A24C"/>
-    <circle cx="365" cy="198" r="18" fill="#75AADB"/>
-    <circle cx="520" cy="284" r="28" fill="#FFFFFF"/>
-    <circle cx="694" cy="214" r="16" fill="#75AADB"/>
-    <circle cx="758" cy="344" r="12" fill="#D4A24C"/>
-    <circle cx="418" cy="398" r="14" fill="#3E78B2"/>
+  <rect x="116" y="118" width="322" height="164" rx="24" fill="#3E78B2"/>
+  <rect x="468" y="118" width="316" height="70" rx="22" fill="#D4A24C"/>
+  <rect x="468" y="220" width="142" height="182" rx="22" fill="#E46D5B"/>
+  <rect x="642" y="220" width="142" height="182" rx="22" fill="#A4C957"/>
+  <circle cx="276" cy="202" r="34" fill="#FFFFFF" opacity="0.9"/>
+</svg>`;
+
+const EDITOR_SVG = `<svg viewBox="0 0 720 430" xmlns="http://www.w3.org/2000/svg">
+  <rect width="720" height="430" rx="32" fill="#FFFFFF"/>
+  <rect x="34" y="34" width="150" height="362" rx="18" fill="#EAF0F8"/>
+  <rect x="210" y="34" width="322" height="362" rx="24" fill="#F4F7FB"/>
+  <rect x="558" y="34" width="128" height="362" rx="18" fill="#172033"/>
+  <rect x="246" y="80" width="250" height="80" rx="18" fill="#3E78B2"/>
+  <rect x="246" y="188" width="112" height="166" rx="18" fill="#D4A24C"/>
+  <rect x="384" y="188" width="112" height="166" rx="18" fill="#5CC8D7"/>
+  <g fill="#FFFFFF" opacity="0.9">
+    <rect x="584" y="76" width="76" height="10" rx="5"/>
+    <rect x="584" y="112" width="52" height="10" rx="5"/>
+    <rect x="584" y="148" width="66" height="10" rx="5"/>
   </g>
 </svg>`;
 
-const FLOW_SVG = `<svg viewBox="0 0 1000 360" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
-  <defs>
-    <linearGradient id="flowA" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#75AADB"/>
-      <stop offset="48%" stop-color="#D4A24C"/>
-      <stop offset="100%" stop-color="#0B1F3A"/>
-    </linearGradient>
-  </defs>
-  <path d="M-30 225 C180 40, 330 320, 510 150 C690 -20, 800 250, 1030 82" fill="none" stroke="url(#flowA)" stroke-width="34" stroke-linecap="round" opacity="0.88"/>
-  <path d="M-20 285 C190 130, 360 350, 540 220 C720 88, 850 300, 1030 180" fill="none" stroke="#75AADB" stroke-width="12" stroke-linecap="round" opacity="0.36"/>
-  <path d="M-20 145 C190 20, 340 225, 500 100 C680 -35, 820 152, 1030 38" fill="none" stroke="#D4A24C" stroke-width="10" stroke-linecap="round" opacity="0.42"/>
-  <g fill="#FFFFFF" stroke="#0B1F3A" stroke-width="7">
-    <circle cx="205" cy="151" r="26"/>
-    <circle cx="510" cy="150" r="34"/>
-    <circle cx="802" cy="215" r="26"/>
+const VECTOR_SVG = `<svg viewBox="0 0 360 260" xmlns="http://www.w3.org/2000/svg">
+  <rect width="360" height="260" rx="28" fill="#0B1F3A"/>
+  <path d="M70 190 C104 76 164 76 196 190" fill="none" stroke="#5CC8D7" stroke-width="12" stroke-linecap="round"/>
+  <path d="M190 160 H292" fill="none" stroke="#D4A24C" stroke-width="12" stroke-linecap="round"/>
+  <path d="M252 120 L292 160 L252 200" fill="none" stroke="#D4A24C" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#FFFFFF">
+    <circle cx="70" cy="190" r="13"/>
+    <circle cx="132" cy="88" r="13"/>
+    <circle cx="196" cy="190" r="13"/>
+    <circle cx="292" cy="160" r="15"/>
   </g>
 </svg>`;
 
-const RADAR_SVG = `<svg viewBox="0 0 520 520" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <radialGradient id="radarFade" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#75AADB" stop-opacity="0.34"/>
-      <stop offset="100%" stop-color="#75AADB" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-  <rect width="520" height="520" rx="28" fill="#0B1F3A"/>
-  <circle cx="260" cy="260" r="205" fill="url(#radarFade)"/>
-  <g fill="none" stroke="#75AADB" stroke-opacity="0.36" stroke-width="2">
-    <circle cx="260" cy="260" r="60"/>
-    <circle cx="260" cy="260" r="120"/>
-    <circle cx="260" cy="260" r="180"/>
-    <path d="M260 52v416M52 260h416M113 113l294 294M407 113 113 407"/>
+const EXPORT_SVG = `<svg viewBox="0 0 720 420" xmlns="http://www.w3.org/2000/svg">
+  <rect width="720" height="420" rx="30" fill="#071425"/>
+  <g fill="#FFFFFF" opacity="0.96">
+    <rect x="70" y="70" width="150" height="210" rx="18"/>
+    <rect x="284" y="70" width="150" height="210" rx="18"/>
+    <rect x="498" y="70" width="150" height="210" rx="18"/>
   </g>
-  <path d="M260 260 L438 155 A205 205 0 0 1 465 260 Z" fill="#D4A24C" opacity="0.34"/>
-  <g fill="#D4A24C">
-    <circle cx="363" cy="176" r="8"/>
-    <circle cx="180" cy="335" r="6"/>
-    <circle cx="308" cy="356" r="10"/>
-    <circle cx="228" cy="158" r="5"/>
+  <g fill="#EAF0F8">
+    <rect x="94" y="104" width="102" height="12" rx="6"/>
+    <rect x="308" y="104" width="102" height="12" rx="6"/>
+    <rect x="522" y="104" width="102" height="12" rx="6"/>
   </g>
+  <g fill="#3E78B2">
+    <rect x="94" y="142" width="102" height="54" rx="12"/>
+    <rect x="308" y="142" width="102" height="54" rx="12"/>
+    <rect x="522" y="142" width="102" height="54" rx="12"/>
+  </g>
+  <path d="M220 318h278" stroke="#D4A24C" stroke-width="12" stroke-linecap="round"/>
+  <path d="M462 282l42 36-42 36" fill="none" stroke="#D4A24C" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>`;
 
-const STORY_SVG = `<svg viewBox="0 0 900 250" xmlns="http://www.w3.org/2000/svg">
-  <g fill="none" stroke="#0B1F3A" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M78 170 C120 72, 190 72, 232 170"/>
-    <path d="M375 178 L450 70 L525 178 Z"/>
-    <path d="M660 172 C710 88, 790 88, 840 172"/>
-  </g>
-  <g fill="#D4A24C">
-    <circle cx="155" cy="112" r="18"/>
-    <circle cx="450" cy="70" r="18"/>
-    <circle cx="750" cy="112" r="18"/>
-  </g>
-  <g fill="#75AADB" opacity="0.9">
-    <rect x="90" y="188" width="130" height="16" rx="8"/>
-    <rect x="385" y="190" width="130" height="16" rx="8"/>
-    <rect x="685" y="188" width="130" height="16" rx="8"/>
-  </g>
-</svg>`;
+type TextEl = Extract<SlideElement, { type: "text" }>;
+type TextListEl = Extract<SlideElement, { type: "text-list" }>;
+type RectEl = Extract<SlideElement, { type: "rectangle" }>;
+type EllipseEl = Extract<SlideElement, { type: "ellipse" }>;
+type GroupEl = Extract<SlideElement, { type: "group" }>;
+type ContainerEl = Extract<SlideElement, { type: "container" }>;
+type GridEl = Extract<SlideElement, { type: "grid" }>;
+type FlexEl = Extract<SlideElement, { type: "flex" }>;
+type SvgEl = Extract<SlideElement, { type: "svg" }>;
+type ImageEl = Extract<SlideElement, { type: "image" }>;
+type ChartEl = Extract<SlideElement, { type: "chart" }>;
+type TableEl = Extract<SlideElement, { type: "table" }>;
 
-const EDITOR_TOOLS_SVG = `<svg viewBox="0 0 420 300" xmlns="http://www.w3.org/2000/svg">
-  <rect width="420" height="300" rx="24" fill="#0B1F3A"/>
-  <g fill="none" stroke="#75AADB" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M78 210 L155 88 L235 210"/>
-    <path d="M185 150 H318"/>
-    <path d="M278 110 L318 150 L278 190"/>
-  </g>
-  <g fill="#D4A24C">
-    <circle cx="78" cy="210" r="15"/>
-    <circle cx="155" cy="88" r="15"/>
-    <circle cx="235" cy="210" r="15"/>
-    <circle cx="318" cy="150" r="17"/>
-  </g>
-  <text x="56" y="265" fill="#FFFFFF" font-family="Arial" font-size="24" font-weight="700">SVG EDIT TARGET</text>
-</svg>`;
+type Align = "left" | "center" | "right";
+type VAlign = "top" | "middle" | "bottom";
 
-// ── Shared chrome ───────────────────────────────────────────────────────
-function footer(num: number, total: number, onDark: boolean): SlideElement[] {
-  const c = onDark ? MUTED_DK : MUTED;
-  return [
-    {
-      type: "text",
-      position: { x: 0.5, y: 5.25 },
-      size: { width: 4, height: 0.3 },
-      runs: [{ text: "LAYOUT SAMPLE" }],
-      font: { family: SANS, size: 9, color: c, letterSpacing: 200 }
-    },
-    {
-      type: "text",
-      position: { x: 8.5, y: 5.25 },
-      size: { width: 1.0, height: 0.3 },
-      runs: [{ text: `${String(num).padStart(2, "0")} / ${String(total).padStart(2, "0")}` }],
-      font: { family: SANS, size: 9, color: c },
-      alignment: { horizontal: "right" }
-    },
-  ];
+function radius(value = 0.12) {
+  return { tl: value, tr: value, bl: value, br: value };
 }
 
-// ── Slide 1: Title ──────────────────────────────────────────────────────
-const TOTAL = 20;
-
-const slide1Title: Slide = {
-  title: "Title",
-  background: NAVY,
-  elements: [
-    // Massive watermark "19" on the right. Box stays inside the slide and
-    // gives ample horizontal room so the digits never wrap or get clipped.
-    {
-      type: "text",
-      position: { x: 3.8, y: 0.1 },
-      size: { width: 6.2, height: 5.4 },
-      runs: [{ text: "19" }],
-      font: { family: SANS, size: 300, color: "FFFFFF", bold: true },
-      alignment: { horizontal: "center", vertical: "middle" },
-      opacity: 0.05
+function text({
+  x,
+  y,
+  w,
+  h,
+  value,
+  size = 12,
+  color = INK,
+  bold,
+  italic,
+  lineHeight,
+  letterSpacing,
+  align,
+  valign,
+  opacity,
+}: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  value: string;
+  size?: number;
+  color?: string;
+  bold?: boolean;
+  italic?: boolean;
+  lineHeight?: number;
+  letterSpacing?: number;
+  align?: Align;
+  valign?: VAlign;
+  opacity?: number;
+}): TextEl {
+  return {
+    type: "text",
+    position: { x, y },
+    size: { width: w, height: h },
+    runs: [{ text: value }],
+    font: {
+      family: SANS,
+      size,
+      color,
+      bold,
+      italic,
+      lineHeight,
+      letterSpacing,
     },
-    // Top kicker
-    {
-      type: "rectangle",
-      position: { x: 0.6, y: 0.55 },
-      size: { width: 0.6, height: 0.06 },
-      fill: { color: GOLD }
-    },
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.7 },
-      size: { width: 6, height: 0.3 },
-      runs: [{ text: "LAYOUT KIT · 2026" }],
-      font: { family: SANS, size: 11, color: BLUE, bold: true, letterSpacing: 300 }
-    },
-    // Big title
-    {
-      type: "text",
-      position: { x: 0.6, y: 1.5 },
-      size: { width: 8.5, height: 2.55 },
-      runs: [{ text: "PRESENTATION\nLAYOUTS" }],
-      font: { family: SANS, size: 78, color: "FFFFFF", bold: true, lineHeight: 1.05, letterSpacing: 50 }
-    },
-    // Divider + tagline
-    {
-      type: "rectangle",
-      position: { x: 0.6, y: 4.15 },
-      size: { width: 0.5, height: 0.04 },
-      fill: { color: GOLD }
-    },
-    {
-      type: "text",
-      position: { x: 0.6, y: 4.3 },
-      size: { width: 8, height: 0.45 },
-      runs: [{ text: "Nineteen common slide patterns built from editable elements." }],
-      font: { family: SANS, size: 18, color: BLUE }
-    },
-    ...footer(1, TOTAL, true),
-  ],
-};
-
-// ── Slide 2: Profile ────────────────────────────────────────────────────
-const slide2Profile: Slide = {
-  title: "Profile",
-  background: OFF_WHITE,
-  elements: [
-    // Left navy panel
-    {
-      type: "rectangle",
-      position: { x: 0, y: 0 },
-      size: { width: 3.7, height: SLIDE_H },
-      fill: { color: NAVY }
-    },
-    // Accent bar across panel
-    {
-      type: "rectangle",
-      position: { x: 0, y: 4.55 },
-      size: { width: 3.7, height: 0.06 },
-      fill: { color: GOLD }
-    },
-    // Eyebrow
-    {
-      type: "text",
-      position: { x: 0.5, y: 0.6 },
-      size: { width: 3.0, height: 0.3 },
-      runs: [{ text: "COMPANY PROFILE" }],
-      font: { family: SANS, size: 10, color: GOLD, bold: true, letterSpacing: 300 }
-    },
-    // Name on panel
-    {
-      type: "text",
-      position: { x: 0.5, y: 1.0 },
-      size: { width: 3.0, height: 1.6 },
-      runs: [{ text: "Acme\nStudio" }],
-      font: { family: SANS, size: 40, color: "FFFFFF", bold: true, lineHeight: 1 }
-    },
-    {
-      type: "text",
-      position: { x: 0.5, y: 2.65 },
-      size: { width: 3.0, height: 0.3 },
-      runs: [{ text: "Product strategy team" }],
-      font: { family: SANS, size: 12, color: BLUE }
-    },
-    // Meta block
-    {
-      type: "text",
-      position: { x: 0.5, y: 3.15 },
-      size: { width: 3.0, height: 1.3 },
-      runs: [{ text: "Founded   2018\n" +
-        "HQ        Remote-first\n" +
-        "Focus     Product design\n" +
-        "Team      42 people" }],
-      font: { family: SANS, size: 11, color: "D5DCE8", lineHeight: 1.6 }
-    },
-
-    // Right side — eyebrow
-    {
-      type: "text",
-      position: { x: 4.2, y: 0.7 },
-      size: { width: 5.4, height: 0.3 },
-      runs: [{ text: "OVERVIEW" }],
-      font: { family: SANS, size: 10, color: BLUE_DK, bold: true, letterSpacing: 300 }
-    },
-    // Headline
-    {
-      type: "text",
-      position: { x: 4.2, y: 1.0 },
-      size: { width: 5.4, height: 0.7 },
-      runs: [{ text: "A concise overview slide" }],
-      font: { family: SANS, size: 26, color: INK, bold: true }
-    },
-    // Lead paragraph
-    {
-      type: "text",
-      position: { x: 4.2, y: 1.85 },
-      size: { width: 5.4, height: 1.3 },
-      runs: [{ text: "A flexible profile layout for a company, product, person, or project. " +
-        "Use the left panel for identity details, then reserve the wider right " +
-        "side for positioning, context, and high-level proof points." }],
-      font: { family: SANS, size: 13, color: INK, lineHeight: 1.45 }
-    },
-    // Highlights header
-    {
-      type: "text",
-      position: { x: 4.2, y: 3.35 },
-      size: { width: 5.4, height: 0.3 },
-      runs: [{ text: "KEY HIGHLIGHTS" }],
-      font: { family: SANS, size: 10, color: BLUE_DK, bold: true, letterSpacing: 300 }
-    },
-    {
-      type: "rectangle",
-      position: { x: 4.2, y: 3.7 },
-      size: { width: 5.4, height: 0.02 },
-      fill: { color: BLUE }
-    },
-    {
-      type: "text-list",
-      position: { x: 4.2, y: 3.85 },
-      size: { width: 5.4, height: 1.4 },
-      marker: "bullet",
-      items: [{ type: "text", text: "Reusable side-panel profile structure" }, { type: "text", text: "Large narrative area for overview copy" }, { type: "text", text: "Editable bullets with accent color" }, { type: "text", text: "Balanced text density for executive scans" }],
-      font: { family: SANS, size: 12, color: INK, lineHeight: 1.4 }
-    },
-    ...footer(2, TOTAL, false),
-  ],
-};
-
-// ── Slide 3: Project timeline ───────────────────────────────────────────
-function timelineStop(
-  cx: number,
-  year: string,
-  letter: string,
-  label: string,
-  period: string,
-): SlideElement[] {
-  return [
-    // Year above
-    {
-      type: "text",
-      position: { x: cx - 1.0, y: 2.0 },
-      size: { width: 2.0, height: 0.35 },
-      runs: [{ text: year }],
-      font: { family: SANS, size: 12, color: GOLD, bold: true, letterSpacing: 200 },
-      alignment: { horizontal: "center" }
-    },
-    // Circle
-    {
-      type: "ellipse",
-      position: { x: cx - 0.45, y: 2.55 },
-      size: { width: 0.9, height: 0.9 },
-      fill: { color: BLUE_DK }
-    },
-    {
-      type: "text",
-      position: { x: cx - 0.45, y: 2.55 },
-      size: { width: 0.9, height: 0.9 },
-      runs: [{ text: letter }],
-      font: { family: SANS, size: 28, color: "FFFFFF", bold: true },
-      alignment: { horizontal: "center", vertical: "middle" }
-    },
-    // Label
-    {
-      type: "text",
-      position: { x: cx - 1.4, y: 3.65 },
-      size: { width: 2.8, height: 0.4 },
-      runs: [{ text: label }],
-      font: { family: SANS, size: 16, color: "FFFFFF", bold: true },
-      alignment: { horizontal: "center" }
-    },
-    // Period
-    {
-      type: "text",
-      position: { x: cx - 1.4, y: 4.05 },
-      size: { width: 2.8, height: 0.3 },
-      runs: [{ text: period }],
-      font: { family: SANS, size: 11, color: MUTED_DK },
-      alignment: { horizontal: "center" }
-    },
-  ];
+    alignment: align || valign ? { horizontal: align, vertical: valign } : undefined,
+    opacity,
+  };
 }
 
-const slide3Timeline: Slide = {
-  title: "Timeline",
-  background: DEEP,
-  elements: [
-    // Eyebrow
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.6 },
-      size: { width: 6, height: 0.3 },
-      runs: [{ text: "PROJECT JOURNEY" }],
-      font: { family: SANS, size: 10, color: GOLD, bold: true, letterSpacing: 300 }
-    },
-    // Title
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.95 },
-      size: { width: 9, height: 0.7 },
-      runs: [{ text: "Three phases from idea to scale." }],
-      font: { family: SANS, size: 28, color: "FFFFFF", bold: true }
-    },
+function bullets({
+  x,
+  y,
+  w,
+  h,
+  items,
+  size = 12,
+  color = INK,
+  marker = "bullet",
+  lineHeight = 1.25,
+}: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  items: string[];
+  size?: number;
+  color?: string;
+  marker?: "bullet" | "number" | "none";
+  lineHeight?: number;
+}): TextListEl {
+  return {
+    type: "text-list",
+    position: { x, y },
+    size: { width: w, height: h },
+    marker,
+    items: items.map((item) => ({ type: "text", text: item })),
+    font: { family: SANS, size, color, lineHeight },
+  };
+}
 
-    // Connecting line
-    {
-      type: "rectangle",
-      position: { x: 1.5, y: 2.99 },
-      size: { width: 7.0, height: 0.025 },
-      fill: { color: BLUE_DK }
-    },
+function rect({
+  x,
+  y,
+  w,
+  h,
+  fill,
+  opacity,
+  stroke,
+  r,
+}: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fill: string;
+  opacity?: number;
+  stroke?: { color: string; width: number };
+  r?: number;
+}): RectEl {
+  return {
+    type: "rectangle",
+    position: { x, y },
+    size: { width: w, height: h },
+    fill: { color: fill, opacity },
+    stroke,
+    borderRadius: r != null ? radius(r) : undefined,
+  };
+}
 
-    // Stops
-    ...timelineStop(1.5, "2024", "D", "Discovery", "Research and framing"),
-    ...timelineStop(5.0, "2025", "L", "Launch", "Build and release"),
-    ...timelineStop(8.5, "2026", "S", "Scale", "Optimize and expand"),
+function ellipse({
+  x,
+  y,
+  w,
+  h,
+  fill,
+  opacity,
+  stroke,
+}: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fill: string;
+  opacity?: number;
+  stroke?: { color: string; width: number };
+}): EllipseEl {
+  return {
+    type: "ellipse",
+    position: { x, y },
+    size: { width: w, height: h },
+    fill: { color: fill, opacity },
+    stroke,
+  };
+}
 
-    ...footer(3, TOTAL, true),
-  ],
-};
-
-// ── Slide 4: Stats grid ─────────────────────────────────────────────────
-function statCard(
+function group(
   x: number,
   y: number,
   w: number,
   h: number,
-  big: string,
-  label: string,
-): SlideElement[] {
+  children: SlideElement[],
+): GroupEl {
+  return {
+    type: "group",
+    position: { x, y },
+    size: { width: w, height: h },
+    children,
+  };
+}
+
+function containerCard({
+  x,
+  y,
+  w,
+  h,
+  fill = PAPER,
+  stroke = LINE,
+  children,
+  r = 0.16,
+}: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fill?: string;
+  stroke?: string;
+  children: SlideElement[];
+  r?: number;
+}): ContainerEl {
+  return {
+    type: "container",
+    position: { x, y },
+    size: { width: w, height: h },
+    fill: { color: fill },
+    stroke: { color: stroke, width: 0.75 },
+    borderRadius: radius(r),
+    child: group(0, 0, w, h, children),
+  };
+}
+
+function svg(x: number, y: number, w: number, h: number, markup: string, name: string): SvgEl {
+  return {
+    type: "svg",
+    position: { x, y },
+    size: { width: w, height: h },
+    svg: markup,
+    name,
+  };
+}
+
+function image(x: number, y: number, w: number, h: number, name: string): ImageEl {
+  return {
+    type: "image",
+    position: { x, y },
+    size: { width: w, height: h },
+    fit: "cover",
+    name,
+    borderRadius: radius(0.16),
+  };
+}
+
+function chart({
+  x,
+  y,
+  w,
+  h,
+  type,
+  title,
+  color,
+  data,
+}: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  type: "bar" | "line" | "donut";
+  title: string;
+  color: string;
+  data: Array<{ label: string; value: number; color?: string }>;
+}): ChartEl {
+  return {
+    type: "chart",
+    position: { x, y },
+    size: { width: w, height: h },
+    chartType: type,
+    title,
+    color,
+    axisColor: "91A2B8",
+    labelColor: MUTED,
+    showValues: true,
+    data,
+  };
+}
+
+function cell(textValue: string, fill = PAPER, color = INK, bold = false): TableCell {
+  return {
+    text: textValue,
+    fill: { color: fill },
+    stroke: { color: LINE, width: 0.5 },
+    font: { color, bold },
+  };
+}
+
+function table({
+  x,
+  y,
+  w,
+  h,
+  columns,
+  rows,
+}: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  columns: string[];
+  rows: string[][];
+}): TableEl {
+  return {
+    type: "table",
+    position: { x, y },
+    size: { width: w, height: h },
+    font: { family: SANS, size: 9, color: INK },
+    columns: columns.map((item) => cell(item, NAVY, PAPER, true)),
+    rows: rows.map((row) => row.map((item) => cell(item))),
+  };
+}
+
+function footer(num: number, onDark: boolean, prompt: string): SlideElement[] {
+  const color = onDark ? "C9D6E6" : MUTED;
   return [
-    // Card
-    {
-      type: "rectangle",
-      position: { x: x, y: y },
-      size: { width: w, height: h },
-      fill: { color: PAPER },
-      borderRadius: { tl: 0.08, tr: 0.08, bl: 0.08, br: 0.08 }
-    },
-    // Left accent stripe
-    {
-      type: "rectangle",
-      position: { x: x, y: y },
-      size: { width: 0.06, height: h },
-      fill: { color: GOLD }
-    },
-    // Big number — sized to its own line-box so the frame doesn't extend
-    // into the label area below.
-    {
-      type: "text",
-      position: { x: x + 0.35, y: y + 0.22 },
-      size: { width: w - 0.5, height: 0.75 },
-      runs: [{ text: big }],
-      font: { family: SANS, size: 48, color: NAVY, bold: true, lineHeight: 1.0 }
-    },
-    // Label — anchored to the card bottom with a clear gap above.
-    {
-      type: "text",
-      position: { x: x + 0.35, y: y + h - 0.32 },
-      size: { width: w - 0.5, height: 0.22 },
-      runs: [{ text: label }],
-      font: { family: SANS, size: 11, color: MUTED, bold: true, letterSpacing: 300 }
-    },
+    text({
+      x: 0.55,
+      y: 5.18,
+      w: 6.8,
+      h: 0.22,
+      value: `Try: ${prompt}`,
+      size: 8.5,
+      color,
+      bold: true,
+    }),
+    text({
+      x: 8.78,
+      y: 5.18,
+      w: 0.7,
+      h: 0.22,
+      value: `${String(num).padStart(2, "0")}/${String(TOTAL).padStart(2, "0")}`,
+      size: 8.5,
+      color,
+      align: "right",
+      letterSpacing: 120,
+    }),
   ];
 }
 
-const slide4Stats: Slide = {
-  title: "Stats",
-  background: OFF_WHITE,
-  elements: [
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.55 },
-      size: { width: 6, height: 0.3 },
-      runs: [{ text: "BY THE NUMBERS" }],
-      font: { family: SANS, size: 10, color: BLUE_DK, bold: true, letterSpacing: 300 }
-    },
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.9 },
-      size: { width: 9, height: 0.7 },
-      runs: [{ text: "Performance at a glance." }],
-      font: { family: SANS, size: 26, color: INK, bold: true }
-    },
-    {
-      type: "text",
-      position: { x: 0.6, y: 1.55 },
-      size: { width: 9, height: 0.3 },
-      runs: [{ text: "Sample metrics for a product, campaign, or operating review." }],
-      font: { family: SANS, size: 12, color: MUTED }
-    },
-
-    ...statCard(0.6, 2.0, 2.72, 1.32, "85%", "ADOPTION"),
-    ...statCard(3.64, 2.0, 2.72, 1.32, "38%", "GROWTH"),
-    ...statCard(6.68, 2.0, 2.72, 1.32, "$1.8M", "PIPELINE"),
-    {
-      type: "chart",
-      position: { x: 0.6, y: 3.45 },
-      size: { width: 4.25, height: 1.45 },
-      chartType: "line",
-      title: "Quarterly trend",
-      color: BLUE_DK,
-      axisColor: MUTED_DK,
-      labelColor: MUTED,
-      showValues: true,
-      data: [
-        { label: "Q1", value: 18 },
-        { label: "Q2", value: 38 },
-        { label: "Q3", value: 58 },
-        { label: "Q4", value: 51 },
-        { label: "Q5", value: 62 },
-      ]
-    },
-    {
-      type: "chart",
-      position: { x: 5.15, y: 3.45 },
-      size: { width: 4.25, height: 1.45 },
-      chartType: "bar",
-      title: "Channel mix",
-      color: GOLD,
-      axisColor: BLUE_DK,
-      labelColor: MUTED,
-      showValues: true,
-      data: [
-        { label: "Web", value: 850, color: GOLD },
-        { label: "Sales", value: 380, color: BLUE_DK },
-        { label: "Partner", value: 140, color: NAVY },
-      ]
-    },
-
-    ...footer(4, TOTAL, false),
-  ],
-};
-
-// ── Slide 5: Milestone highlight ────────────────────────────────────────
-function milestoneStat(x: number, big: string, label: string): SlideElement[] {
+function header({
+  num,
+  label,
+  title,
+  body,
+  onDark = false,
+}: {
+  num: number;
+  label: string;
+  title: string;
+  body: string;
+  onDark?: boolean;
+}): SlideElement[] {
+  const primary = onDark ? PAPER : INK;
+  const secondary = onDark ? "CAD6E7" : MUTED;
   return [
-    {
-      type: "text",
-      position: { x: x, y: 4.0 },
-      size: { width: 2.6, height: 0.7 },
-      runs: [{ text: big }],
-      font: { family: SANS, size: 44, color: GOLD, bold: true, lineHeight: 1 },
-      alignment: { horizontal: "center" }
-    },
-    {
-      type: "text",
-      position: { x: x, y: 4.75 },
-      size: { width: 2.6, height: 0.3 },
-      runs: [{ text: label }],
-      font: { family: SANS, size: 10, color: BLUE, bold: true, letterSpacing: 300 },
-      alignment: { horizontal: "center" }
-    },
+    rect({ x: 0.55, y: 0.48, w: 0.48, h: 0.06, fill: onDark ? CYAN : BLUE }),
+    text({
+      x: 0.55,
+      y: 0.65,
+      w: 3.2,
+      h: 0.22,
+      value: `FEATURE ${String(num).padStart(2, "0")} | ${label}`,
+      size: 8.5,
+      color: onDark ? CYAN : BLUE,
+      bold: true,
+      letterSpacing: 220,
+    }),
+    text({
+      x: 0.55,
+      y: 0.96,
+      w: 6.5,
+      h: 0.54,
+      value: title,
+      size: 24,
+      color: primary,
+      bold: true,
+      lineHeight: 1.05,
+    }),
+    text({
+      x: 0.58,
+      y: 1.48,
+      w: 6.6,
+      h: 0.42,
+      value: body,
+      size: 11,
+      color: secondary,
+      lineHeight: 1.25,
+    }),
   ];
 }
 
-const slide5Milestone: Slide = {
-  title: "Milestone",
-  background: NAVY,
-  elements: [
-    // Decorative big "26" watermark. Box is intentionally much wider/taller
-    // than the text so engine-to-engine metric differences (Chrome vs Google
-    // Slides) can't cause wrapping or clipping.
-    {
-      type: "text",
-      position: { x: 3.5, y: 0.1 },
-      size: { width: 6.5, height: 5.4 },
-      runs: [{ text: "26" }],
-      font: { family: SANS, size: 240, color: "FFFFFF", bold: true },
-      alignment: { horizontal: "center", vertical: "middle" },
-      opacity: 0.05
-    },
+function slide({
+  num,
+  title,
+  label,
+  body,
+  background = MIST,
+  onDark = false,
+  prompt,
+  elements,
+}: {
+  num: number;
+  title: string;
+  label: string;
+  body: string;
+  background?: string;
+  onDark?: boolean;
+  prompt: string;
+  elements: SlideElement[];
+}): Slide {
+  return {
+    title,
+    background,
+    elements: [
+      ...header({ num, label, title, body, onDark }),
+      ...elements,
+      ...footer(num, onDark, prompt),
+    ],
+  };
+}
 
-    {
-      type: "rectangle",
-      position: { x: 0.6, y: 0.55 },
-      size: { width: 0.6, height: 0.06 },
-      fill: { color: GOLD }
-    },
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.7 },
-      size: { width: 6, height: 0.3 },
-      runs: [{ text: "MILESTONE 2026" }],
-      font: { family: SANS, size: 11, color: GOLD, bold: true, letterSpacing: 300 }
-    },
-    {
-      type: "text",
-      position: { x: 0.6, y: 1.25 },
-      size: { width: 9, height: 1.6 },
-      runs: [{ text: "“A turning point for the team.”" }],
-      font: { family: SANS, size: 44, color: "FFFFFF", bold: true, italic: true, lineHeight: 1.1 }
-    },
-    {
-      type: "text",
-      position: { x: 0.6, y: 3.1 },
-      size: { width: 6.5, height: 0.8 },
-      runs: [{ text: "Use this layout for a launch, funding moment, award, major customer win, or any story that deserves a dramatic single-slide treatment." }],
-      font: { family: SANS, size: 13, color: "D5DCE8", lineHeight: 1.5 }
-    },
+function metricCard(title: string, value: string, accent: string): GroupEl {
+  return group(0, 0, 2.05, 1.08, [
+    rect({ x: 0, y: 0, w: 2.05, h: 1.08, fill: PAPER, stroke: { color: LINE, width: 0.65 }, r: 0.13 }),
+    rect({ x: 0, y: 0, w: 0.07, h: 1.08, fill: accent, r: 0.03 }),
+    text({ x: 0.22, y: 0.18, w: 1.6, h: 0.42, value, size: 25, color: INK, bold: true }),
+    text({ x: 0.24, y: 0.72, w: 1.45, h: 0.18, value: title, size: 7.5, color: MUTED, bold: true, letterSpacing: 160 }),
+  ]);
+}
 
-    // Divider above stats
-    {
-      type: "rectangle",
-      position: { x: 0.6, y: 3.9 },
-      size: { width: 8.8, height: 0.01 },
-      fill: { color: BLUE_DK },
-      opacity: 0.5
-    },
+function miniFeature(title: string, body: string, accent: string): GroupEl {
+  return group(0, 0, 2.55, 1.34, [
+    rect({ x: 0, y: 0, w: 2.55, h: 1.34, fill: PAPER, stroke: { color: LINE, width: 0.65 }, r: 0.14 }),
+    ellipse({ x: 0.22, y: 0.2, w: 0.32, h: 0.32, fill: accent }),
+    text({ x: 0.66, y: 0.18, w: 1.55, h: 0.25, value: title, size: 12, color: INK, bold: true }),
+    text({ x: 0.66, y: 0.52, w: 1.65, h: 0.46, value: body, size: 8.5, color: MUTED, lineHeight: 1.22 }),
+  ]);
+}
 
-    ...milestoneStat(0.6, "7", "MARKETS"),
-    ...milestoneStat(3.7, "3", "TEAMS"),
-    ...milestoneStat(6.8, "2", "REGIONS"),
-
-    ...footer(5, TOTAL, true),
-  ],
-};
-
-const slide6Table: Slide = {
-  title: "Data Table",
-  background: OFF_WHITE,
-  elements: [
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.55 },
-      size: { width: 6, height: 0.3 },
-      runs: [{ text: "DATA TABLE" }],
-      font: { family: SANS, size: 10, color: BLUE_DK, bold: true, letterSpacing: 300 }
-    },
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.9 },
-      size: { width: 8.8, height: 0.7 },
-      runs: [{ text: "Performance across segments." }],
-      font: { family: SANS, size: 26, color: INK, bold: true }
-    },
-    {
-      type: "text",
-      position: { x: 0.6, y: 1.55 },
-      size: { width: 8.6, height: 0.3 },
-      runs: [{ text: "A compact native table assembled from editable text and shape elements." }],
-      font: { family: SANS, size: 12, color: MUTED }
-    },
-    {
-      type: "table",
-      position: { x: 0.8, y: 2.05 },
-      size: { width: 7.65, height: 2.6 },
-      font: { family: SANS, size: 11, color: INK },
-      columns: [{ text: "Segment", fill: { color: NAVY }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: "FFFFFF", bold: true } }, { text: "Users", fill: { color: NAVY }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: "FFFFFF", bold: true } }, { text: "Revenue", fill: { color: NAVY }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: "FFFFFF", bold: true } }, { text: "Growth", fill: { color: NAVY }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: "FFFFFF", bold: true } }],
-      rows: [[{ text: "Enterprise", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }, { text: "520", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }, { text: "$4.7M", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }, { text: "21%", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }], [{ text: "Mid-market", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }, { text: "163", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }, { text: "$1.3M", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }, { text: "40%", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }], [{ text: "Self-serve", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }, { text: "190+", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }, { text: "$1.1M", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }, { text: "60%", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }], [{ text: "Partners", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }, { text: "26", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }, { text: "$0.8M", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }, { text: "18%", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }]],
-      opacity: 1
-    },
-    {
-      type: "text",
-      position: { x: 8.65, y: 2.05 },
-      size: { width: 0.55, height: 2.55 },
-      runs: [{ text: "04" }],
-      font: { family: SANS, size: 76, color: GOLD, bold: true },
-      alignment: { horizontal: "center", vertical: "middle" },
-      opacity: 0.26
-    },
-    ...footer(6, TOTAL, false),
-  ],
-};
-
-const slide7Grid: Slide = {
-  title: "3x3 Grid",
-  background: OFF_WHITE,
-  elements: [
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.55 },
-      size: { width: 6, height: 0.3 },
-      runs: [{ text: "CONTENT GRID" }],
-      font: { family: SANS, size: 10, color: BLUE_DK, bold: true, letterSpacing: 300 }
-    },
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.9 },
-      size: { width: 8.8, height: 0.7 },
-      runs: [{ text: "Nine editable placeholders." }],
-      font: { family: SANS, size: 26, color: INK, bold: true }
-    },
-    {
-      type: "text",
-      position: { x: 0.6, y: 1.5 },
-      size: { width: 8.6, height: 0.3 },
-      runs: [{ text: "A 3x3 layout for numbered ideas, features, or milestones." }],
-      font: { family: SANS, size: 12, color: MUTED }
-    },
-    ...[
-      "Opening idea",
-      "Metric placeholder",
-      "Visual placeholder",
-      "Key point",
-      "Trend slot",
-      "Photo slot",
-      "Proof point",
-      "Comparison",
-      "Final visual",
-    ].flatMap((label, index): SlideElement[] => {
-      const col = index % 3;
-      const row = Math.floor(index / 3);
-      const x = 1.25 + col * 2.59;
-      const y = 1.85 + row * 1.06;
-      return [
-        {
-          type: "rectangle",
-          position: { x: x, y: y },
-          size: { width: 2.41, height: 0.88 },
-          fill: { color: PAPER },
-          stroke: { color: "DDE5F0", width: 0.75 },
-          borderRadius: { tl: 0.08, tr: 0.08, bl: 0.08, br: 0.08 }
-        },
-        {
-          type: "text",
-          position: { x: x, y: y + 0.16 },
-          size: { width: 2.41, height: 0.3 },
-          runs: [{ text: String(index + 1).padStart(2, "0") }],
-          font: { family: SANS, size: 24, color: BLUE_DK, bold: true },
-          alignment: { horizontal: "center" }
-        },
-        {
-          type: "text",
-          position: { x: x + 0.18, y: y + 0.58 },
-          size: { width: 2.05, height: 0.15 },
-          runs: [{ text: label.toUpperCase() }],
-          font: { family: SANS, size: 7, color: MUTED, bold: true, letterSpacing: 170 },
-          alignment: { horizontal: "center" }
-        },
-      ];
-    }),
-    ...footer(7, TOTAL, false),
-  ],
-};
-
-// ── Slide 8: Section divider ────────────────────────────────────────────
-const slide8SectionDivider: Slide = {
-  title: "Section Divider",
-  background: NAVY,
-  elements: [
-    {
-      type: "rectangle",
-      position: { x: 0, y: 0 },
-      size: { width: 3.0, height: SLIDE_H },
-      fill: { color: DEEP }
-    },
-    {
-      type: "rectangle",
-      position: { x: 3.0, y: 0 },
-      size: { width: 0.08, height: SLIDE_H },
-      fill: { color: GOLD }
-    },
-    {
-      type: "text",
-      position: { x: 0.55, y: 0.72 },
-      size: { width: 1.7, height: 0.35 },
-      runs: [{ text: "02" }],
-      font: { family: SANS, size: 14, color: GOLD, bold: true, letterSpacing: 260 }
-    },
-    {
-      type: "text",
-      position: { x: 0.55, y: 2.05 },
-      size: { width: 2.0, height: 1.45 },
-      runs: [{ text: "THE\nGAME" }],
-      font: { family: SANS, size: 36, color: "FFFFFF", bold: true, lineHeight: 1.0 }
-    },
-    {
-      type: "text",
-      position: { x: 3.65, y: 1.25 },
-      size: { width: 5.8, height: 1.4 },
-      runs: [{ text: "Common deck layouts, rendered as fully editable slide elements." }],
-      font: { family: SANS, size: 30, color: "FFFFFF", bold: true, lineHeight: 1.18 }
-    },
-    {
-      type: "text",
-      position: { x: 3.65, y: 3.05 },
-      size: { width: 5.2, height: 0.85 },
-      runs: [{ text: "Use this as a richer fixture for previews, export checks, and editor interactions." }],
-      font: { family: SANS, size: 13, color: "D5DCE8", lineHeight: 1.45 }
-    },
-    ...footer(8, TOTAL, true),
-  ],
-};
-
-// ── Slide 9: Two-column content ─────────────────────────────────────────
-const slide9TwoColumn: Slide = {
-  title: "Two Column",
-  background: OFF_WHITE,
-  elements: [
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.55 },
-      size: { width: 6, height: 0.3 },
-      runs: [{ text: "TWO-COLUMN LAYOUT" }],
-      font: { family: SANS, size: 10, color: BLUE_DK, bold: true, letterSpacing: 300 }
-    },
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.9 },
-      size: { width: 8.8, height: 0.7 },
-      runs: [{ text: "Vision on the left, evidence on the right." }],
-      font: { family: SANS, size: 26, color: INK, bold: true }
-    },
-    {
-      type: "rectangle",
-      position: { x: 0.75, y: 1.85 },
-      size: { width: 4.0, height: 2.85 },
-      fill: { color: PAPER },
-      borderRadius: { tl: 0.08, tr: 0.08, bl: 0.08, br: 0.08 }
-    },
-    {
-      type: "rectangle",
-      position: { x: 5.25, y: 1.85 },
-      size: { width: 4.0, height: 2.85 },
-      fill: { color: PAPER },
-      borderRadius: { tl: 0.08, tr: 0.08, bl: 0.08, br: 0.08 }
-    },
-    {
-      type: "text",
-      position: { x: 1.1, y: 2.2 },
-      size: { width: 3.25, height: 0.35 },
-      runs: [{ text: "STRATEGY" }],
-      font: { family: SANS, size: 10, color: GOLD, bold: true, letterSpacing: 260 }
-    },
-    {
-      type: "text",
-      position: { x: 1.1, y: 2.62 },
-      size: { width: 3.25, height: 1.35 },
-      runs: [{ text: "A clear frame for priorities, tradeoffs, and action." }],
-      font: { family: SANS, size: 21, color: INK, bold: true, lineHeight: 1.2 }
-    },
-    {
-      type: "text-list",
-      position: { x: 5.62, y: 2.22 },
-      size: { width: 3.25, height: 1.85 },
-      marker: "bullet",
-      items: [{ type: "text", text: "Use the left column for the core message" }, { type: "text", text: "Use the right column for evidence or detail" }, { type: "text", text: "Keep both sides balanced and scannable" }],
-      font: { family: SANS, size: 12, color: INK, lineHeight: 1.35 }
-    },
-    ...footer(9, TOTAL, false),
-  ],
-};
-
-// ── Slide 10: Image and caption ─────────────────────────────────────────
-const slide10ImageCaption: Slide = {
-  title: "Image Caption",
-  background: PAPER,
-  elements: [
-    {
-      type: "image",
-      position: { x: 0, y: 0 },
-      size: { width: 5.55, height: SLIDE_H },
-      fit: "cover",
-      name: "Full-height image placeholder"
-    },
-    {
-      type: "rectangle",
-      position: { x: 5.55, y: 0 },
-      size: { width: 4.45, height: SLIDE_H },
-      fill: { color: NAVY }
-    },
-    {
-      type: "text",
-      position: { x: 6.05, y: 0.72 },
-      size: { width: 3.4, height: 0.3 },
-      runs: [{ text: "IMAGE + CAPTION" }],
-      font: { family: SANS, size: 10, color: GOLD, bold: true, letterSpacing: 260 }
-    },
-    {
-      type: "text",
-      position: { x: 6.05, y: 1.35 },
-      size: { width: 3.35, height: 1.65 },
-      runs: [{ text: "A visual lead with a strong editorial caption." }],
-      font: { family: SANS, size: 30, color: "FFFFFF", bold: true, lineHeight: 1.15 }
-    },
-    {
-      type: "text",
-      position: { x: 6.05, y: 3.35 },
-      size: { width: 3.25, height: 0.9 },
-      runs: [{ text: "Drop in a product screenshot, customer image, venue photo, or campaign visual. The caption block stays editable." }],
-      font: { family: SANS, size: 13, color: "D5DCE8", lineHeight: 1.45 }
-    },
-    {
-      type: "rectangle",
-      position: { x: 6.05, y: 4.55 },
-      size: { width: 0.46, height: 0.04 },
-      fill: { color: GOLD }
-    },
-    ...footer(10, TOTAL, true),
-  ],
-};
-
-// ── Slide 11: Process steps ─────────────────────────────────────────────
-function processStep(x: number, n: string, title: string, body: string): SlideElement[] {
+function stageDot(x: number, y: number, fill: string, label: string): SlideElement[] {
   return [
-    {
-      type: "ellipse",
-      position: { x: x, y: 2.05 },
-      size: { width: 0.72, height: 0.72 },
-      fill: { color: BLUE_DK }
-    },
-    {
-      type: "text",
-      position: { x: x, y: 2.05 },
-      size: { width: 0.72, height: 0.72 },
-      runs: [{ text: n }],
-      font: { family: SANS, size: 18, color: "FFFFFF", bold: true },
-      alignment: { horizontal: "center", vertical: "middle" }
-    },
-    {
-      type: "text",
-      position: { x: x - 0.42, y: 3.0 },
-      size: { width: 1.55, height: 0.35 },
-      runs: [{ text: title }],
-      font: { family: SANS, size: 14, color: INK, bold: true },
-      alignment: { horizontal: "center" }
-    },
-    {
-      type: "text",
-      position: { x: x - 0.5, y: 3.42 },
-      size: { width: 1.72, height: 0.7 },
-      runs: [{ text: body }],
-      font: { family: SANS, size: 10, color: MUTED, lineHeight: 1.25 },
-      alignment: { horizontal: "center" }
-    },
+    ellipse({ x, y, w: 0.48, h: 0.48, fill }),
+    text({
+      x: x,
+      y: y + 0.09,
+      w: 0.48,
+      h: 0.2,
+      value: label,
+      size: 10,
+      color: PAPER,
+      bold: true,
+      align: "center",
+    }),
   ];
 }
 
-const slide11Process: Slide = {
-  title: "Process",
-  background: OFF_WHITE,
-  elements: [
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.55 },
-      size: { width: 6, height: 0.3 },
-      runs: [{ text: "PROCESS LAYOUT" }],
-      font: { family: SANS, size: 10, color: BLUE_DK, bold: true, letterSpacing: 300 }
-    },
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.9 },
-      size: { width: 8.8, height: 0.7 },
-      runs: [{ text: "Four steps from insight to action." }],
-      font: { family: SANS, size: 26, color: INK, bold: true }
-    },
-    {
-      type: "rectangle",
-      position: { x: 1.25, y: 2.4 },
-      size: { width: 7.1, height: 0.03 },
-      fill: { color: BLUE },
-      opacity: 0.55
-    },
-    ...processStep(1.25, "1", "Discover", "Collect context, constraints, and user needs."),
-    ...processStep(3.55, "2", "Define", "Align on scope, priorities, and success criteria."),
-    ...processStep(5.85, "3", "Build", "Create the solution and validate the details."),
-    ...processStep(8.15, "4", "Launch", "Release, measure, and improve the experience."),
-    ...footer(11, TOTAL, false),
-  ],
-};
-
-// ── Slide 12: Comparison ────────────────────────────────────────────────
-const slide12Comparison: Slide = {
-  title: "Comparison",
-  background: PAPER,
-  elements: [
-    {
-      type: "rectangle",
-      position: { x: 0, y: 0 },
-      size: { width: 5, height: SLIDE_H },
-      fill: { color: OFF_WHITE }
-    },
-    {
-      type: "rectangle",
-      position: { x: 5, y: 0 },
-      size: { width: 5, height: SLIDE_H },
-      fill: { color: NAVY }
-    },
-    {
-      type: "text",
-      position: { x: 0.65, y: 0.65 },
-      size: { width: 3.6, height: 0.3 },
-      runs: [{ text: "BEFORE" }],
-      font: { family: SANS, size: 10, color: BLUE_DK, bold: true, letterSpacing: 300 }
-    },
-    {
-      type: "text",
-      position: { x: 5.65, y: 0.65 },
-      size: { width: 3.6, height: 0.3 },
-      runs: [{ text: "AFTER" }],
-      font: { family: SANS, size: 10, color: GOLD, bold: true, letterSpacing: 300 }
-    },
-    {
-      type: "text",
-      position: { x: 0.65, y: 1.2 },
-      size: { width: 3.65, height: 1.15 },
-      runs: [{ text: "A manual workflow with limited visibility." }],
-      font: { family: SANS, size: 28, color: INK, bold: true, lineHeight: 1.12 }
-    },
-    {
-      type: "text",
-      position: { x: 5.65, y: 1.2 },
-      size: { width: 3.65, height: 1.15 },
-      runs: [{ text: "A scalable system with shared visibility." }],
-      font: { family: SANS, size: 28, color: "FFFFFF", bold: true, lineHeight: 1.12 }
-    },
-    {
-      type: "text-list",
-      position: { x: 0.85, y: 2.8 },
-      size: { width: 3.55, height: 1.3 },
-      marker: "bullet",
-      items: [{ type: "text", text: "Fragmented tools" }, { type: "text", text: "Slow handoffs" }, { type: "text", text: "Limited reporting" }],
-      font: { family: SANS, size: 12, color: INK, lineHeight: 1.35 }
-    },
-    {
-      type: "text-list",
-      position: { x: 5.85, y: 2.8 },
-      size: { width: 3.55, height: 1.3 },
-      marker: "bullet",
-      items: [{ type: "text", text: "Central workspace" }, { type: "text", text: "Clear ownership" }, { type: "text", text: "Reliable dashboards" }],
-      font: { family: SANS, size: 12, color: "E8EEF7", lineHeight: 1.35 }
-    },
-    ...footer(12, TOTAL, false),
-  ],
-};
-
-// ── Slide 13: Agenda / tabs ─────────────────────────────────────────────
-const slide13Agenda: Slide = {
-  title: "Agenda",
-  background: OFF_WHITE,
-  elements: [
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.55 },
-      size: { width: 6, height: 0.3 },
-      runs: [{ text: "AGENDA LAYOUT" }],
-      font: { family: SANS, size: 10, color: BLUE_DK, bold: true, letterSpacing: 300 }
-    },
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.9 },
-      size: { width: 8.8, height: 0.7 },
-      runs: [{ text: "A clean structure for meetings and reports." }],
-      font: { family: SANS, size: 26, color: INK, bold: true }
-    },
-    ...["Context", "Analysis", "Decision", "Next steps"].flatMap((label, index): SlideElement[] => {
-      const y = 1.85 + index * 0.78;
-      return [
-        {
-          type: "rectangle",
-          position: { x: 0.85, y: y },
-          size: { width: 8.3, height: 0.58 },
-          fill: { color: index === 1 ? NAVY : PAPER },
-          borderRadius: { tl: 0.08, tr: 0.08, bl: 0.08, br: 0.08 }
-        },
-        {
-          type: "text",
-          position: { x: 1.15, y: y + 0.16 },
-          size: { width: 0.55, height: 0.2 },
-          runs: [{ text: String(index + 1).padStart(2, "0") }],
-          font: { family: SANS, size: 10, color: index === 1 ? GOLD : BLUE_DK, bold: true }
-        },
-        {
-          type: "text",
-          position: { x: 1.95, y: y + 0.13 },
-          size: { width: 3.0, height: 0.28 },
-          runs: [{ text: label }],
-          font: { family: SANS, size: 14, color: index === 1 ? "FFFFFF" : INK, bold: true }
-        },
-        {
-          type: "text",
-          position: { x: 5.15, y: y + 0.15 },
-          size: { width: 3.45, height: 0.24 },
-          runs: [{ text: index === 1 ? "Current section highlighted" : "Editable agenda description" }],
-          font: { family: SANS, size: 10, color: index === 1 ? "D5DCE8" : MUTED },
-          alignment: { horizontal: "right" }
-        },
-      ];
-    }),
-    ...footer(13, TOTAL, false),
-  ],
-};
-
-// ── Slide 14: Gallery cards ─────────────────────────────────────────────
-const slide14Gallery: Slide = {
-  title: "Gallery",
-  background: PAPER,
-  elements: [
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.55 },
-      size: { width: 6, height: 0.3 },
-      runs: [{ text: "GALLERY LAYOUT" }],
-      font: { family: SANS, size: 10, color: BLUE_DK, bold: true, letterSpacing: 300 }
-    },
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.9 },
-      size: { width: 8.8, height: 0.7 },
-      runs: [{ text: "Four visual moments with short labels." }],
-      font: { family: SANS, size: 26, color: INK, bold: true }
-    },
-    ...["Kickoff", "Prototype", "Launch", "Scale"].flatMap((label, index): SlideElement[] => {
-      const x = 0.75 + index * 2.28;
-      return [
-        {
-          type: "image",
-          position: { x: x, y: 1.9 },
-          size: { width: 1.85, height: 2.25 },
-          fit: "cover",
-          name: `${label} image placeholder`
-        },
-        {
-          type: "text",
-          position: { x: x, y: 4.28 },
-          size: { width: 1.85, height: 0.3 },
-          runs: [{ text: label }],
-          font: { family: SANS, size: 13, color: INK, bold: true },
-          alignment: { horizontal: "center" }
-        },
-        {
-          type: "text",
-          position: { x: x, y: 4.62 },
-          size: { width: 1.85, height: 0.28 },
-          runs: [{ text: `Phase ${index + 1}` }],
-          font: { family: SANS, size: 10, color: MUTED },
-          alignment: { horizontal: "center" }
-        },
-      ];
-    }),
-    ...footer(14, TOTAL, false),
-  ],
-};
-
-// ── Slide 15: SVG constellation map ─────────────────────────────────────
-const slide15Constellation: Slide = {
-  title: "Constellation",
+const slide1 = {
+  title: "Editor Showcase",
   background: DEEP,
   elements: [
-    {
-      type: "svg",
-      position: { x: 0, y: 0 },
-      size: { width: 10, height: SLIDE_H },
-      svg: ORBIT_SVG,
-      name: "Orbit network"
-    },
-    {
-      type: "text",
-      position: { x: 0.65, y: 0.58 },
-      size: { width: 4, height: 0.3 },
-      runs: [{ text: "SYSTEM MAP" }],
-      font: { family: SANS, size: 10, color: GOLD, bold: true, letterSpacing: 300 }
-    },
-    {
-      type: "text",
-      position: { x: 0.65, y: 1.0 },
-      size: { width: 3.65, height: 1.35 },
-      runs: [{ text: "Turn scattered signals into a visible operating model." }],
-      font: { family: SANS, size: 29, color: "FFFFFF", bold: true, lineHeight: 1.12 }
-    },
-    {
-      type: "text",
-      position: { x: 0.65, y: 2.72 },
-      size: { width: 3.2, height: 0.82 },
-      runs: [{ text: "A wild visual slide for architecture, ecosystems, stakeholder maps, or product platforms." }],
-      font: { family: SANS, size: 12, color: "D5DCE8", lineHeight: 1.4 }
-    },
-    {
-      type: "text",
-      position: { x: 6.45, y: 4.42 },
-      size: { width: 2.8, height: 0.35 },
-      runs: [{ text: "CORE NODE" }],
-      font: { family: SANS, size: 10, color: GOLD, bold: true, letterSpacing: 240 },
-      alignment: { horizontal: "right" }
-    },
-    ...footer(15, TOTAL, true),
-  ],
-};
-
-// ── Slide 16: SVG kinetic flow ──────────────────────────────────────────
-const slide16KineticFlow: Slide = {
-  title: "Kinetic Flow",
-  background: OFF_WHITE,
-  elements: [
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.55 },
-      size: { width: 5, height: 0.3 },
-      runs: [{ text: "KINETIC ROADMAP" }],
-      font: { family: SANS, size: 10, color: BLUE_DK, bold: true, letterSpacing: 300 }
-    },
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.9 },
-      size: { width: 7.2, height: 0.72 },
-      runs: [{ text: "A roadmap that feels like motion." }],
-      font: { family: SANS, size: 27, color: INK, bold: true }
-    },
-    {
-      type: "svg",
-      position: { x: 0, y: 1.65 },
-      size: { width: 10, height: 2.25 },
-      svg: FLOW_SVG,
-      name: "Flow ribbon"
-    },
-    ...["Discover", "Build", "Scale"].flatMap((label, index): SlideElement[] => {
-      const x = 0.85 + index * 3.05;
-      return [
-        {
-          type: "rectangle",
-          position: { x: x, y: 3.8 },
-          size: { width: 2.45, height: 0.85 },
-          fill: { color: PAPER },
-          borderRadius: { tl: 0.08, tr: 0.08, bl: 0.08, br: 0.08 }
-        },
-        {
-          type: "text",
-          position: { x: x + 0.24, y: 4.03 },
-          size: { width: 1.95, height: 0.25 },
-          runs: [{ text: label }],
-          font: { family: SANS, size: 14, color: INK, bold: true },
-          alignment: { horizontal: "center" }
-        },
-        {
-          type: "text",
-          position: { x: x + 0.24, y: 4.36 },
-          size: { width: 1.95, height: 0.18 },
-          runs: [{ text: `MOTION ${index + 1}` }],
-          font: { family: SANS, size: 7, color: MUTED, bold: true, letterSpacing: 180 },
-          alignment: { horizontal: "center" }
-        },
-      ];
+    svg(5.72, 0.52, 3.78, 2.2, EDITOR_SVG, "Editor canvas overview"),
+    rect({ x: 0.55, y: 0.52, w: 0.58, h: 0.07, fill: CYAN }),
+    text({
+      x: 0.55,
+      y: 0.72,
+      w: 4.2,
+      h: 0.24,
+      value: "PRESENTON EDITOR SHOWCASE",
+      size: 9.5,
+      color: CYAN,
+      bold: true,
+      letterSpacing: 260,
     }),
-    ...footer(16, TOTAL, false),
-  ],
-};
-
-// ── Slide 17: SVG command center ────────────────────────────────────────
-const slide17CommandCenter: Slide = {
-  title: "Command Center",
-  background: NAVY,
-  elements: [
-    {
-      type: "svg",
-      position: { x: 0.62, y: 0.62 },
-      size: { width: 4.35, height: 4.35 },
-      svg: RADAR_SVG,
-      name: "Radar panel"
-    },
-    {
-      type: "text",
-      position: { x: 5.45, y: 0.72 },
-      size: { width: 3.8, height: 0.3 },
-      runs: [{ text: "COMMAND CENTER" }],
-      font: { family: SANS, size: 10, color: GOLD, bold: true, letterSpacing: 300 }
-    },
-    {
-      type: "text",
-      position: { x: 5.45, y: 1.14 },
-      size: { width: 3.65, height: 1.28 },
-      runs: [{ text: "High-signal view for moments that need focus." }],
-      font: { family: SANS, size: 28, color: "FFFFFF", bold: true, lineHeight: 1.13 }
-    },
-    ...[
-      ["ACTIVE", "24"],
-      ["RISK", "03"],
-      ["CLEAR", "91%"],
-    ].flatMap(([label, value], index): SlideElement[] => {
-      const y = 2.78 + index * 0.58;
-      return [
-        {
-          type: "rectangle",
-          position: { x: 5.45, y: y },
-          size: { width: 3.65, height: 0.42 },
-          fill: { color: "102A4A" },
-          borderRadius: { tl: 0.06, tr: 0.06, bl: 0.06, br: 0.06 }
-        },
-        {
-          type: "text",
-          position: { x: 5.68, y: y + 0.12 },
-          size: { width: 1.2, height: 0.18 },
-          runs: [{ text: label }],
-          font: { family: SANS, size: 8, color: MUTED_DK, bold: true, letterSpacing: 180 }
-        },
-        {
-          type: "text",
-          position: { x: 7.85, y: y + 0.07 },
-          size: { width: 0.95, height: 0.28 },
-          runs: [{ text: value }],
-          font: { family: SANS, size: 14, color: GOLD, bold: true },
-          alignment: { horizontal: "right" }
-        },
-      ];
+    text({
+      x: 0.55,
+      y: 1.12,
+      w: 5.0,
+      h: 1.55,
+      value: "A live deck that teaches the editor by being editable.",
+      size: 35,
+      color: PAPER,
+      bold: true,
+      lineHeight: 1.08,
     }),
-    ...footer(17, TOTAL, true),
-  ],
-};
-
-// ── Slide 18: SVG storyboard ────────────────────────────────────────────
-const slide18Storyboard: Slide = {
-  title: "Storyboard",
-  background: PAPER,
-  elements: [
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.55 },
-      size: { width: 5, height: 0.3 },
-      runs: [{ text: "STORYBOARD" }],
-      font: { family: SANS, size: 10, color: BLUE_DK, bold: true, letterSpacing: 300 }
-    },
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.9 },
-      size: { width: 8.6, height: 0.65 },
-      runs: [{ text: "Three frames, one crisp narrative arc." }],
-      font: { family: SANS, size: 26, color: INK, bold: true }
-    },
-    {
-      type: "rectangle",
-      position: { x: 0.6, y: 1.82 },
-      size: { width: 2.55, height: 2.38 },
-      fill: { color: OFF_WHITE },
-      borderRadius: { tl: 0.08, tr: 0.08, bl: 0.08, br: 0.08 }
-    },
-    {
-      type: "rectangle",
-      position: { x: 3.72, y: 1.82 },
-      size: { width: 2.55, height: 2.38 },
-      fill: { color: OFF_WHITE },
-      borderRadius: { tl: 0.08, tr: 0.08, bl: 0.08, br: 0.08 }
-    },
-    {
-      type: "rectangle",
-      position: { x: 6.84, y: 1.82 },
-      size: { width: 2.55, height: 2.38 },
-      fill: { color: OFF_WHITE },
-      borderRadius: { tl: 0.08, tr: 0.08, bl: 0.08, br: 0.08 }
-    },
-    {
-      type: "svg",
-      position: { x: 0.78, y: 2.2 },
-      size: { width: 8.45, height: 1.55 },
-      svg: STORY_SVG,
-      name: "Storyboard icons"
-    },
-    ...["Problem", "Shift", "Outcome"].flatMap((label, index): SlideElement[] => {
-      const x = 0.92 + index * 3.12;
-      return [
-        {
-          type: "text",
-          position: { x: x, y: 3.78 },
-          size: { width: 1.9, height: 0.28 },
-          runs: [{ text: label }],
-          font: { family: SANS, size: 14, color: INK, bold: true },
-          alignment: { horizontal: "center" }
-        },
-        {
-          type: "text",
-          position: { x: x, y: 4.22 },
-          size: { width: 1.9, height: 0.22 },
-          runs: [{ text: `FRAME ${index + 1}` }],
-          font: { family: SANS, size: 7, color: MUTED, bold: true, letterSpacing: 160 },
-          alignment: { horizontal: "center" }
-        },
-      ];
+    text({
+      x: 0.58,
+      y: 2.88,
+      w: 4.7,
+      h: 0.7,
+      value: "Every slide is a feature lab: select nested items, edit text inline, inspect layouts, update data, upload images, and export with confidence.",
+      size: 12.5,
+      color: "C9D6E6",
+      lineHeight: 1.35,
     }),
-    ...footer(18, TOTAL, false),
+    {
+      type: "grid",
+      position: { x: 0.58, y: 3.88 },
+      size: { width: 8.9, height: 0.92 },
+      columns: 4,
+      gap: 0.18,
+      alignItems: "stretch",
+      justifyItems: "stretch",
+      children: [
+        miniFeature("Select", "Click a leaf object inside any layout.", CYAN),
+        miniFeature("Edit", "Double-click text, charts, tables, and SVG.", AMBER),
+        miniFeature("Layout", "Tune flex, grid, repeaters, and padding.", CORAL),
+        miniFeature("Export", "Keep the same model across outputs.", LIME),
+      ],
+    } satisfies GridEl,
+    ...footer(1, true, "click through the deck, then edit any nested child object"),
   ],
-};
+} satisfies Slide;
 
-// ── Slide 19: Editor feature lab ────────────────────────────────────────
-const slide19EditorFeatureLab: Slide = {
-  title: "Editor Feature Lab",
-  background: OFF_WHITE,
+const slide2 = slide({
+  num: 2,
+  title: "Typed objects, not pixels",
+  label: "Schema",
+  body: "The deck is made from exact typed elements. The editor, inspector, canvas, and export all read the same object model.",
+  prompt: "open the drawer and inspect any object as source-of-truth data",
+  elements: [
+    svg(6.58, 0.72, 2.65, 1.58, GRID_SVG, "Schema grid diagram"),
+    {
+      type: "grid",
+      position: { x: 0.72, y: 2.15 },
+      size: { width: 5.55, height: 2.15 },
+      columns: 2,
+      gap: 0.18,
+      alignItems: "stretch",
+      justifyItems: "stretch",
+      children: [
+        miniFeature("Text", "Runs, fonts, wrapping, alignment.", BLUE),
+        miniFeature("Shapes", "Fills, strokes, radius, opacity.", CORAL),
+        miniFeature("Data", "Charts and tables stay editable.", GREEN),
+        miniFeature("Layouts", "Flex, grid, containers, repeaters.", AMBER),
+      ],
+    } satisfies GridEl,
+    table({
+      x: 6.56,
+      y: 2.42,
+      w: 2.75,
+      h: 1.52,
+      columns: ["Layer", "Reads"],
+      rows: [
+        ["Canvas", "SlideElement"],
+        ["Inspector", "SlideElement"],
+        ["Export", "SlideElement"],
+      ],
+    }),
+  ],
+});
+
+const slide3 = slide({
+  num: 3,
+  title: "Flex layouts that breathe",
+  label: "Adaptive Flex",
+  body: "Flex rows and columns distribute space, respect gaps, and keep child content editable after layout resolution.",
+  prompt: "select a card inside the flex row and edit its title without selecting the whole row",
   elements: [
     {
-      type: "text",
-      position: { x: 0.6, y: 0.5 },
-      size: { width: 5.2, height: 0.3 },
-      runs: [{ text: "EDITOR FEATURE LAB" }],
-      font: { family: SANS, size: 10, color: BLUE_DK, bold: true, letterSpacing: 300 }
-    },
-    {
-      type: "text",
-      position: { x: 0.6, y: 0.85 },
-      size: { width: 6.2, height: 0.58 },
-      runs: [{ text: "One slide for testing new object workflows." }],
-      font: { family: SANS, size: 24, color: INK, bold: true }
-    },
-    {
-      type: "text-list",
-      position: { x: 0.72, y: 1.62 },
-      size: { width: 2.6, height: 1.18 },
-      marker: "bullet",
-      items: [{ type: "text", text: "Toolbar routing" }, { type: "text", text: "Inline editing" }, { type: "text", text: "Drawer inspection" }],
-      font: { family: SANS, size: 15, color: INK, lineHeight: 1.18 }
-    },
-    {
-      type: "image",
-      position: { x: 0.72, y: 3.05 },
-      size: { width: 2.6, height: 1.38 },
-      fit: "cover",
-      name: "Upload target"
-    },
-    {
-      type: "rectangle",
-      position: { x: 3.62, y: 1.56 },
-      size: { width: 1.05, height: 0.64 },
-      fill: { color: GOLD },
-      stroke: { color: NAVY, width: 0.75 },
-      borderRadius: { tl: 0.08, tr: 0.08, bl: 0.08, br: 0.08 }
-    },
-    {
-      type: "ellipse",
-      position: { x: 4.88, y: 1.56 },
-      size: { width: 0.86, height: 0.64 },
-      fill: { color: BLUE },
-      stroke: { color: BLUE_DK, width: 0.75 }
-    },
-    {
-      type: "text",
-      position: { x: 3.62, y: 2.38 },
-      size: { width: 2.2, height: 0.8 },
-      runs: [{ text: "Shape toolbar\nand geometry" }],
-      font: { family: SANS, size: 17, color: INK, bold: true, lineHeight: 1.15 }
-    },
-    {
-      type: "svg",
-      position: { x: 6.2, y: 0.9 },
-      size: { width: 2.95, height: 1.88 },
-      svg: EDITOR_TOOLS_SVG,
-      name: "SVG toolbar target"
-    },
-    {
-      type: "chart",
-      position: { x: 3.62, y: 3.1 },
-      size: { width: 2.35, height: 1.38 },
-      chartType: "donut",
-      title: "Chart target",
-      color: BLUE_DK,
-      axisColor: MUTED_DK,
-      labelColor: MUTED,
-      showValues: true,
-      data: [
-        { label: "Edit", value: 46, color: BLUE_DK },
-        { label: "Inspect", value: 32, color: GOLD },
-        { label: "Export", value: 22, color: NAVY },
-      ]
-    },
-    {
-      type: "table",
-      position: { x: 6.2, y: 3.05 },
-      size: { width: 3.0, height: 1.42 },
-      font: { family: SANS, size: 9, color: INK },
-      columns: [{ text: "Feature", fill: { color: NAVY }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: "FFFFFF", bold: true } }, { text: "Target", fill: { color: NAVY }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: "FFFFFF", bold: true } }],
-      rows: [[{ text: "Chart", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }, { text: "Toolbar", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }], [{ text: "SVG", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }, { text: "Toolbar", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }], [{ text: "Table", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }, { text: "Inline", fill: { color: PAPER }, stroke: { color: "DDE5F0", width: 0.5 }, font: { color: INK } }]]
-    },
-    ...footer(19, TOTAL, false),
+      type: "flex",
+      position: { x: 0.72, y: 2.05 },
+      size: { width: 8.55, height: 2.22 },
+      direction: "row",
+      gap: 0.22,
+      alignItems: "stretch",
+      justifyContent: "stretch",
+      padding: { top: 0.08, right: 0.08, bottom: 0.08, left: 0.08 },
+      children: [
+        containerCard({
+          x: 0,
+          y: 0,
+          w: 2.2,
+          h: 2.0,
+          fill: NAVY,
+          stroke: NAVY,
+          children: [
+            text({ x: 0.22, y: 0.24, w: 1.65, h: 0.22, value: "BASIS", size: 8, color: CYAN, bold: true, letterSpacing: 180 }),
+            text({ x: 0.22, y: 0.58, w: 1.65, h: 0.62, value: "Fixed start width", size: 19, color: PAPER, bold: true, lineHeight: 1.1 }),
+            text({ x: 0.22, y: 1.45, w: 1.55, h: 0.28, value: "basis: 2.2", size: 9, color: "C9D6E6" }),
+          ],
+        }),
+        {
+          ...containerCard({
+            x: 0,
+            y: 0,
+            w: 2.2,
+            h: 2.0,
+            fill: PAPER,
+            children: [
+              text({ x: 0.24, y: 0.24, w: 1.7, h: 0.22, value: "GROW", size: 8, color: GREEN, bold: true, letterSpacing: 180 }),
+              text({ x: 0.24, y: 0.58, w: 1.7, h: 0.56, value: "Middle area expands", size: 18, color: INK, bold: true, lineHeight: 1.12 }),
+              bullets({ x: 0.24, y: 1.28, w: 1.55, h: 0.42, items: ["grow: 2", "stretch height"], size: 8.5, color: MUTED }),
+            ],
+          }),
+          layout: { grow: 2, basis: 2.2 },
+        },
+        {
+          ...containerCard({
+            x: 0,
+            y: 0,
+            w: 2.2,
+            h: 2.0,
+            fill: "FFF8EB",
+            stroke: "F1D6A1",
+            children: [
+              text({ x: 0.24, y: 0.24, w: 1.7, h: 0.22, value: "ALIGN", size: 8, color: AMBER, bold: true, letterSpacing: 180 }),
+              text({ x: 0.24, y: 0.58, w: 1.7, h: 0.64, value: "Child content remains live", size: 18, color: INK, bold: true, lineHeight: 1.12 }),
+              text({ x: 0.24, y: 1.48, w: 1.55, h: 0.2, value: "select inner text", size: 8.5, color: MUTED }),
+            ],
+          }),
+          layout: { grow: 1, basis: 2.2 },
+        },
+      ],
+    } satisfies FlexEl,
+    text({ x: 0.95, y: 4.55, w: 8.0, h: 0.3, value: "The row owns placement. Each child still owns content, style, and data.", size: 11, color: MUTED, align: "center" }),
   ],
-};
+});
 
-// ── Slide 20: Closing quote ─────────────────────────────────────────────
-const slide20Closing: Slide = {
-  title: "Closing",
-  background: OFF_WHITE,
+const slide4 = slide({
+  num: 4,
+  title: "Grid with real spans",
+  label: "Adaptive Grid",
+  body: "Grid placement supports columns, rows, gaps, item alignment, and child spans for dashboard-grade slide composition.",
+  prompt: "select one grid tile and change its text or color from the toolbar",
   elements: [
-    // Big decorative opening quote
     {
-      type: "text",
-      position: { x: 0.3, y: 0 },
-      size: { width: 3.5, height: 4.2 },
-      runs: [{ text: "“" }],
-      font: { family: SANS, size: 260, color: GOLD, bold: true, lineHeight: 1 },
-      opacity: 0.18
-    },
-
-    {
-      type: "text",
-      position: { x: 1.2, y: 0.7 },
-      size: { width: 7, height: 0.3 },
-      runs: [{ text: "CLOSING THOUGHT" }],
-      font: { family: SANS, size: 10, color: BLUE_DK, bold: true, letterSpacing: 300 }
-    },
-
-    // Quote — no manual \n; let the engine wrap inside the box so wrapping
-    // is identical between the CSS preview and the PPTX export.
-    {
-      type: "text",
-      position: { x: 1.2, y: 1.3 },
-      size: { width: 7.6, height: 2.8 },
-      runs: [{ text: "The best presentations make the important idea easy to understand, easy to remember, and easy to act on." }],
-      font: { family: SANS, size: 24, color: INK, italic: true, lineHeight: 1.35 }
-    },
-
-    {
-      type: "rectangle",
-      position: { x: 1.2, y: 4.2 },
-      size: { width: 0.4, height: 0.04 },
-      fill: { color: GOLD }
-    },
-    {
-      type: "text",
-      position: { x: 1.2, y: 4.35 },
-      size: { width: 7, height: 0.35 },
-      runs: [{ text: "Sample Attribution" }],
-      font: { family: SANS, size: 14, color: INK, bold: true }
-    },
-    {
-      type: "text",
-      position: { x: 1.2, y: 4.7 },
-      size: { width: 7, height: 0.3 },
-      runs: [{ text: "Role, company, or source" }],
-      font: { family: SANS, size: 11, color: MUTED }
-    },
-
-    ...footer(20, TOTAL, false),
+      type: "grid",
+      position: { x: 0.72, y: 2.02 },
+      size: { width: 8.55, height: 2.65 },
+      columns: 4,
+      rows: 2,
+      gap: 0.18,
+      alignItems: "stretch",
+      justifyItems: "stretch",
+      padding: { top: 0.04, right: 0.04, bottom: 0.04, left: 0.04 },
+      children: [
+        {
+          ...containerCard({
+            x: 0,
+            y: 0,
+            w: 4.1,
+            h: 1.15,
+            fill: NAVY,
+            stroke: NAVY,
+            children: [
+              text({ x: 0.26, y: 0.22, w: 2.8, h: 0.24, value: "SPAN 2 COLUMNS", size: 8, color: CYAN, bold: true, letterSpacing: 170 }),
+              text({ x: 0.26, y: 0.54, w: 3.2, h: 0.32, value: "Hero tile", size: 20, color: PAPER, bold: true }),
+            ],
+          }),
+          layout: { columnSpan: 2 },
+        },
+        metricCard("NESTED CHART", "62%", GREEN),
+        metricCard("LIVE DATA", "8", AMBER),
+        metricCard("ALIGN SELF", "C", LAVENDER),
+        {
+          ...containerCard({
+            x: 0,
+            y: 0,
+            w: 4.1,
+            h: 1.15,
+            fill: PAPER,
+            children: [
+              text({ x: 0.26, y: 0.22, w: 2.9, h: 0.24, value: "SPAN 2 COLUMNS", size: 8, color: CORAL, bold: true, letterSpacing: 170 }),
+              text({ x: 0.26, y: 0.56, w: 3.25, h: 0.3, value: "Narrative and proof together", size: 18, color: INK, bold: true }),
+            ],
+          }),
+          layout: { columnSpan: 2 },
+        },
+      ],
+    } satisfies GridEl,
   ],
-};
+});
+
+const slide5 = slide({
+  num: 5,
+  title: "Nested containers stay editable",
+  label: "Selection Paths",
+  body: "Containers can hold groups, text, charts, images, and shapes. The editor now routes selection to the exact nested source item.",
+  prompt: "click the chart, title, or bullet list inside the card and edit only that child",
+  elements: [
+    containerCard({
+      x: 0.72,
+      y: 2.0,
+      w: 5.2,
+      h: 2.62,
+      fill: PAPER,
+      children: [
+        rect({ x: 0.24, y: 0.26, w: 0.48, h: 0.06, fill: CORAL }),
+        text({ x: 0.24, y: 0.48, w: 2.8, h: 0.32, value: "Nested launch card", size: 20, color: INK, bold: true }),
+        bullets({
+          x: 0.24,
+          y: 0.98,
+          w: 2.22,
+          h: 0.82,
+          items: ["Container background", "Group composition", "Child editing"],
+          size: 10,
+          color: MUTED,
+        }),
+        chart({
+          x: 2.78,
+          y: 0.5,
+          w: 2.0,
+          h: 1.35,
+          type: "donut",
+          title: "Edit target",
+          color: BLUE,
+          data: [
+            { label: "Text", value: 34, color: BLUE },
+            { label: "Data", value: 28, color: AMBER },
+            { label: "Media", value: 38, color: CORAL },
+          ],
+        }),
+        rect({ x: 0.24, y: 2.08, w: 4.62, h: 0.01, fill: LINE }),
+        text({ x: 0.24, y: 2.22, w: 4.1, h: 0.18, value: "One parent. Many directly editable children.", size: 9.5, color: MUTED }),
+      ],
+    }),
+    containerCard({
+      x: 6.22,
+      y: 2.0,
+      w: 3.05,
+      h: 2.62,
+      fill: NAVY,
+      stroke: NAVY,
+      children: [
+        text({ x: 0.28, y: 0.3, w: 2.3, h: 0.26, value: "What changed", size: 9, color: CYAN, bold: true, letterSpacing: 180 }),
+        text({ x: 0.28, y: 0.72, w: 2.25, h: 0.82, value: "Selection follows source paths.", size: 21, color: PAPER, bold: true, lineHeight: 1.1 }),
+        text({ x: 0.28, y: 1.8, w: 2.28, h: 0.48, value: "The inspector and inline editor update the child, not a duplicate adapter.", size: 10.5, color: "C9D6E6", lineHeight: 1.25 }),
+      ],
+    }),
+  ],
+});
+
+const slide6 = slide({
+  num: 6,
+  title: "Inline text feels immediate",
+  label: "Text Studio",
+  body: "Text, bullet lists, and rich typography can be edited directly on the canvas while preserving export-friendly text boxes.",
+  prompt: "double-click the headline or bullet list, type, then click away",
+  elements: [
+    containerCard({
+      x: 0.72,
+      y: 2.0,
+      w: 4.2,
+      h: 2.64,
+      fill: PAPER,
+      children: [
+        text({ x: 0.3, y: 0.3, w: 3.25, h: 0.88, value: "The quickest path from idea to polished slide.", size: 25, color: INK, bold: true, lineHeight: 1.1 }),
+        text({ x: 0.3, y: 1.42, w: 3.35, h: 0.64, value: "The DOM overlay and PPTX export both shrink and wrap text with the same intent.", size: 11, color: MUTED, lineHeight: 1.35 }),
+        rect({ x: 0.3, y: 2.25, w: 0.42, h: 0.05, fill: CORAL }),
+      ],
+    }),
+    containerCard({
+      x: 5.2,
+      y: 2.0,
+      w: 4.05,
+      h: 2.64,
+      fill: "FFF8EB",
+      stroke: "F1D6A1",
+      children: [
+        text({ x: 0.3, y: 0.28, w: 2.8, h: 0.26, value: "BULLET TARGET", size: 8.5, color: AMBER, bold: true, letterSpacing: 170 }),
+        bullets({
+          x: 0.34,
+          y: 0.78,
+          w: 3.2,
+          h: 1.38,
+          items: ["Direct inline editing", "Toolbar font controls", "Overflow checks in the inspector", "Clean export behavior"],
+          size: 13,
+          color: INK,
+          lineHeight: 1.2,
+        }),
+      ],
+    }),
+  ],
+});
+
+const slide7 = slide({
+  num: 7,
+  title: "Data is part of the canvas",
+  label: "Charts And Tables",
+  body: "Charts and tables are first-class editor objects. They can sit alone or inside layout containers and remain editable.",
+  prompt: "double-click the chart or table, then update the data in place",
+  elements: [
+    {
+      type: "grid",
+      position: { x: 0.72, y: 2.0 },
+      size: { width: 8.55, height: 2.64 },
+      columns: 2,
+      gap: 0.28,
+      alignItems: "stretch",
+      justifyItems: "stretch",
+      children: [
+        chart({
+          x: 0,
+          y: 0,
+          w: 4.05,
+          h: 2.45,
+          type: "line",
+          title: "Editor adoption",
+          color: BLUE,
+          data: [
+            { label: "Mon", value: 22 },
+            { label: "Tue", value: 39 },
+            { label: "Wed", value: 48 },
+            { label: "Thu", value: 72 },
+            { label: "Fri", value: 88 },
+          ],
+        }),
+        table({
+          x: 0,
+          y: 0,
+          w: 4.05,
+          h: 2.45,
+          columns: ["Object", "Action", "Status"],
+          rows: [
+            ["Chart", "Inline edit", "Live"],
+            ["Table", "Cell select", "Live"],
+            ["Export", "Native", "Ready"],
+            ["Schema", "Typed", "Ready"],
+          ],
+        }),
+      ],
+    } satisfies GridEl,
+  ],
+});
+
+const slide8 = slide({
+  num: 8,
+  title: "Media and vectors are editable",
+  label: "Visual Assets",
+  body: "Images, SVG, and shapes share the same selection model, so visual work stays inside the editor instead of a separate design tool.",
+  prompt: "select the image placeholder to upload, then select the SVG to edit markup",
+  elements: [
+    image(0.72, 2.0, 3.05, 2.58, "Upload target"),
+    containerCard({
+      x: 4.05,
+      y: 2.0,
+      w: 2.42,
+      h: 2.58,
+      fill: NAVY,
+      stroke: NAVY,
+      children: [
+        svg(0.34, 0.34, 1.74, 1.25, VECTOR_SVG, "Editable SVG target"),
+        text({ x: 0.28, y: 1.84, w: 1.88, h: 0.26, value: "SVG target", size: 13, color: PAPER, bold: true, align: "center" }),
+      ],
+    }),
+    containerCard({
+      x: 6.78,
+      y: 2.0,
+      w: 2.48,
+      h: 2.58,
+      fill: PAPER,
+      children: [
+        rect({ x: 0.42, y: 0.38, w: 1.05, h: 0.62, fill: AMBER, stroke: { color: NAVY, width: 0.6 }, r: 0.12 }),
+        ellipse({ x: 1.1, y: 0.92, w: 0.78, h: 0.78, fill: CYAN, stroke: { color: BLUE, width: 0.6 } }),
+        rect({ x: 0.56, y: 1.56, w: 1.32, h: 0.08, fill: CORAL, r: 0.04 }),
+        text({ x: 0.28, y: 1.94, w: 1.88, h: 0.28, value: "Shape toolbar", size: 13, color: INK, bold: true, align: "center" }),
+      ],
+    }),
+  ],
+});
+
+const slide9 = slide({
+  num: 9,
+  title: "Repeaters remove busywork",
+  label: "List And Grid Views",
+  body: "List-view and grid-view generate repeated visual structures from a single template item. Great for steps, dots, ratings, and small multiples.",
+  prompt: "select any repeated dot or step; the source template updates the pattern",
+  elements: [
+    text({ x: 0.72, y: 2.05, w: 2.6, h: 0.28, value: "List-view timeline", size: 14, color: INK, bold: true }),
+    {
+      type: "list-view",
+      position: { x: 0.72, y: 2.55 },
+      size: { width: 8.55, height: 0.82 },
+      direction: "row",
+      gap: 0.18,
+      alignItems: "center",
+      justifyContent: "stretch",
+      count: 5,
+      item: group(0, 0, 1.55, 0.64, [
+        rect({ x: 0, y: 0.26, w: 1.2, h: 0.07, fill: LINE, r: 0.03 }),
+        ellipse({ x: 0, y: 0.08, w: 0.38, h: 0.38, fill: BLUE }),
+        text({ x: 0.5, y: 0.12, w: 0.74, h: 0.18, value: "STEP", size: 8, color: MUTED, bold: true, letterSpacing: 120 }),
+      ]),
+    },
+    text({ x: 0.72, y: 3.76, w: 2.6, h: 0.28, value: "Grid-view signal field", size: 14, color: INK, bold: true }),
+    {
+      type: "grid-view",
+      position: { x: 0.72, y: 4.18 },
+      size: { width: 4.05, height: 0.52 },
+      columns: 12,
+      rows: 2,
+      gap: 0.08,
+      alignItems: "center",
+      justifyItems: "center",
+      count: 24,
+      item: {
+        type: "ellipse",
+        size: { width: 0.12, height: 0.12 },
+        fill: { color: LIME },
+        opacity: 0.85,
+      },
+    },
+    text({ x: 5.25, y: 3.96, w: 3.75, h: 0.55, value: "Repeaters are not screenshots. They are live generated elements with editable template children.", size: 12, color: MUTED, lineHeight: 1.3 }),
+  ],
+});
+
+const slide10 = slide({
+  num: 10,
+  title: "Toolbars follow the selected object",
+  label: "Inspector UX",
+  body: "The workspace toolbar and side inspector now read the resolved selected element while writing back to the real source path.",
+  prompt: "select each object below and watch the toolbar change to its controls",
+  elements: [
+    {
+      type: "flex",
+      position: { x: 0.72, y: 2.0 },
+      size: { width: 8.55, height: 2.62 },
+      direction: "row",
+      gap: 0.22,
+      alignItems: "stretch",
+      justifyContent: "stretch",
+      children: [
+        containerCard({
+          x: 0,
+          y: 0,
+          w: 2.0,
+          h: 2.4,
+          fill: PAPER,
+          children: [
+            text({ x: 0.22, y: 0.25, w: 1.4, h: 0.22, value: "TEXT", size: 8, color: BLUE, bold: true, letterSpacing: 160 }),
+            text({ x: 0.22, y: 0.7, w: 1.46, h: 0.72, value: "Font, color, alignment", size: 19, color: INK, bold: true, lineHeight: 1.08 }),
+            rect({ x: 0.22, y: 1.92, w: 1.12, h: 0.07, fill: BLUE, r: 0.03 }),
+          ],
+        }),
+        containerCard({
+          x: 0,
+          y: 0,
+          w: 2.0,
+          h: 2.4,
+          fill: "FFF8EB",
+          stroke: "F1D6A1",
+          children: [
+            text({ x: 0.22, y: 0.25, w: 1.4, h: 0.22, value: "SHAPE", size: 8, color: AMBER, bold: true, letterSpacing: 160 }),
+            rect({ x: 0.34, y: 0.72, w: 1.1, h: 0.68, fill: AMBER, stroke: { color: NAVY, width: 0.5 }, r: 0.15 }),
+            text({ x: 0.22, y: 1.75, w: 1.48, h: 0.28, value: "Fill + stroke", size: 12, color: INK, bold: true, align: "center" }),
+          ],
+        }),
+        containerCard({
+          x: 0,
+          y: 0,
+          w: 2.0,
+          h: 2.4,
+          fill: NAVY,
+          stroke: NAVY,
+          children: [
+            text({ x: 0.22, y: 0.25, w: 1.4, h: 0.22, value: "TABLE", size: 8, color: CYAN, bold: true, letterSpacing: 160 }),
+            table({ x: 0.22, y: 0.68, w: 1.48, h: 1.04, columns: ["A", "B"], rows: [["1", "2"], ["3", "4"]] }),
+            text({ x: 0.22, y: 1.9, w: 1.48, h: 0.2, value: "Cell controls", size: 10, color: "C9D6E6", align: "center" }),
+          ],
+        }),
+        containerCard({
+          x: 0,
+          y: 0,
+          w: 2.0,
+          h: 2.4,
+          fill: PAPER,
+          children: [
+            text({ x: 0.22, y: 0.25, w: 1.4, h: 0.22, value: "CHART", size: 8, color: GREEN, bold: true, letterSpacing: 160 }),
+            chart({ x: 0.22, y: 0.64, w: 1.48, h: 1.1, type: "bar", title: "Mix", color: GREEN, data: [{ label: "A", value: 34 }, { label: "B", value: 52 }, { label: "C", value: 27 }] }),
+          ],
+        }),
+      ],
+    } satisfies FlexEl,
+  ],
+});
+
+const slide11 = slide({
+  num: 11,
+  title: "Export without losing intent",
+  label: "Output",
+  body: "The same resolved layout feeds presentation mode, PPTX, PDF, and export screenshots, so the deck stays consistent after editing.",
+  background: DEEP,
+  onDark: true,
+  prompt: "change text or data, then export to verify the same structure travels with it",
+  elements: [
+    svg(5.94, 0.76, 3.28, 1.9, EXPORT_SVG, "Export pipeline"),
+    {
+      type: "grid",
+      position: { x: 0.72, y: 2.18 },
+      size: { width: 8.52, height: 2.24 },
+      columns: 3,
+      gap: 0.22,
+      alignItems: "stretch",
+      justifyItems: "stretch",
+      children: [
+        miniFeature("Native PPTX", "Editable text, charts, shapes, and tables.", CYAN),
+        miniFeature("PDF / Raster", "Rendered from the same slide surface.", AMBER),
+        miniFeature("Keynote path", "Export options preserve the model first.", LIME),
+      ],
+    } satisfies GridEl,
+    text({ x: 1.02, y: 4.55, w: 7.6, h: 0.28, value: "Layout resolution happens once, then every renderer follows it.", size: 11, color: "C9D6E6", align: "center" }),
+  ],
+});
+
+const slide12 = {
+  title: "Everything is editable",
+  background: MIST,
+  elements: [
+    ...header({
+      num: 12,
+      label: "Start Here Again",
+      title: "Use this deck as the editor tour.",
+      body: "It is a showcase, a test fixture, and a teaching deck in one. Every visible object is a real editor element.",
+    }),
+    {
+      type: "grid",
+      position: { x: 0.72, y: 2.0 },
+      size: { width: 5.8, height: 2.62 },
+      columns: 2,
+      gap: 0.2,
+      alignItems: "stretch",
+      justifyItems: "stretch",
+      children: [
+        metricCard("LAYOUT TYPES", "6", BLUE),
+        metricCard("OBJECT TYPES", "9", CORAL),
+        metricCard("LIVE EDITING", "ON", GREEN),
+        metricCard("EXPORT PATHS", "3", AMBER),
+      ],
+    } satisfies GridEl,
+    containerCard({
+      x: 6.85,
+      y: 2.0,
+      w: 2.42,
+      h: 2.62,
+      fill: NAVY,
+      stroke: NAVY,
+      children: [
+        ...stageDot(0.42, 0.42, CYAN, "1"),
+        ...stageDot(1.48, 0.42, AMBER, "2"),
+        ...stageDot(0.42, 1.34, CORAL, "3"),
+        ...stageDot(1.48, 1.34, LIME, "4"),
+        text({ x: 0.3, y: 2.18, w: 1.82, h: 0.22, value: "Make a slide. Edit deeply. Export cleanly.", size: 8.5, color: "C9D6E6", align: "center" }),
+      ],
+    }),
+    ...footer(12, false, "duplicate a slide, change the layout, and keep editing inside it"),
+  ],
+} satisfies Slide;
 
 export const layoutKitDeck: Deck = {
-  title: "Presentation Layout Kit",
+  title: "Presenton Editor Showcase",
+  description:
+    "A guided deck where each slide demonstrates one editor capability with real editable elements.",
   theme: {
-    background: OFF_WHITE,
+    background: MIST,
+    surface: PAPER,
     primary: NAVY,
-    secondary: BLUE_DK,
-    accent: GOLD,
+    secondary: BLUE,
+    accent: AMBER,
     text: INK,
+    muted: MUTED,
   },
   slides: [
-    slide1Title,
-    slide2Profile,
-    slide3Timeline,
-    slide4Stats,
-    slide5Milestone,
-    slide6Table,
-    slide7Grid,
-    slide8SectionDivider,
-    slide9TwoColumn,
-    slide10ImageCaption,
-    slide11Process,
-    slide12Comparison,
-    slide13Agenda,
-    slide14Gallery,
-    slide15Constellation,
-    slide16KineticFlow,
-    slide17CommandCenter,
-    slide18Storyboard,
-    slide19EditorFeatureLab,
-    slide20Closing,
+    slide1,
+    slide2,
+    slide3,
+    slide4,
+    slide5,
+    slide6,
+    slide7,
+    slide8,
+    slide9,
+    slide10,
+    slide11,
+    slide12,
   ],
 };

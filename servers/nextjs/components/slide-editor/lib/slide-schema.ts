@@ -56,6 +56,21 @@ export const PaddingSchema = z
   })
   .strict();
 
+export const LayoutItemSchema = z
+  .object({
+    grow: z.number().min(0).max(12).nullish(),
+    shrink: z.number().min(0).max(12).nullish(),
+    basis: z.number().positive().max(SLIDE_W).nullish(),
+    minWidth: z.number().min(0).max(SLIDE_W).nullish(),
+    maxWidth: z.number().positive().max(SLIDE_W).nullish(),
+    minHeight: z.number().min(0).max(SLIDE_H).nullish(),
+    maxHeight: z.number().positive().max(SLIDE_H).nullish(),
+    columnSpan: z.number().int().min(1).max(12).nullish(),
+    rowSpan: z.number().int().min(1).max(12).nullish(),
+    alignSelf: LayoutAlignmentSchema.nullish(),
+  })
+  .strict();
+
 export const AlignmentSchema = z
   .object({
     horizontal: HorizontalAlignmentSchema.nullish(),
@@ -146,6 +161,7 @@ const elementBaseShape = {
   componentInstanceId: z.string().min(1).max(160).nullish(),
   componentDescription: z.string().max(600).nullish(),
   componentSlot: z.string().min(1).max(120).nullish(),
+  layout: LayoutItemSchema.nullish(),
 };
 
 const requiredElementBaseShape = {
@@ -179,6 +195,7 @@ type ElementBaseOutput = {
   componentInstanceId?: string | null | undefined;
   componentDescription?: string | null | undefined;
   componentSlot?: string | null | undefined;
+  layout?: z.infer<typeof LayoutItemSchema> | null | undefined;
 };
 
 type RequiredElementBaseOutput = ElementBaseOutput & {
@@ -202,6 +219,7 @@ type FlexElementOutput = RequiredElementBaseOutput & {
   wrap?: boolean | null | undefined;
   alignItems?: z.infer<typeof LayoutAlignmentSchema> | null | undefined;
   justifyContent?: z.infer<typeof LayoutAlignmentSchema> | null | undefined;
+  padding?: z.infer<typeof PaddingSchema> | null | undefined;
   gap?: number | null | undefined;
   columnGap?: number | null | undefined;
   rowGap?: number | null | undefined;
@@ -219,6 +237,7 @@ type GridElementOutput = RequiredElementBaseOutput & {
   rowGap?: number | null | undefined;
   alignItems?: z.infer<typeof LayoutAlignmentSchema> | null | undefined;
   justifyItems?: z.infer<typeof LayoutAlignmentSchema> | null | undefined;
+  padding?: z.infer<typeof PaddingSchema> | null | undefined;
   children: SlideElementOutput[];
   maxChildren?: number | null | undefined;
   minChildren?: number | null | undefined;
@@ -232,6 +251,7 @@ type ListViewElementOutput = ElementBaseOutput & {
   rowGap?: number | null | undefined;
   alignItems?: z.infer<typeof LayoutAlignmentSchema> | null | undefined;
   justifyContent?: z.infer<typeof LayoutAlignmentSchema> | null | undefined;
+  padding?: z.infer<typeof PaddingSchema> | null | undefined;
   count: number;
   item: SlideElementOutput;
   maxCount?: number | null | undefined;
@@ -247,6 +267,7 @@ type GridViewElementOutput = ElementBaseOutput & {
   rowGap?: number | null | undefined;
   alignItems?: z.infer<typeof LayoutAlignmentSchema> | null | undefined;
   justifyItems?: z.infer<typeof LayoutAlignmentSchema> | null | undefined;
+  padding?: z.infer<typeof PaddingSchema> | null | undefined;
   count: number;
   item: SlideElementOutput;
   maxCount?: number | null | undefined;
@@ -384,6 +405,7 @@ export const FlexElementSchema: z.ZodType<FlexElementOutput> = z
     wrap: z.boolean().nullish(),
     alignItems: LayoutAlignmentSchema.nullish(),
     justifyContent: LayoutAlignmentSchema.nullish(),
+    padding: PaddingSchema.nullish(),
     gap: z.number().nullish(),
     columnGap: z.number().nullish(),
     rowGap: z.number().nullish(),
@@ -406,6 +428,7 @@ export const GridElementSchema: z.ZodType<GridElementOutput> = z
     rowGap: z.number().nullish(),
     alignItems: LayoutAlignmentSchema.nullish(),
     justifyItems: LayoutAlignmentSchema.nullish(),
+    padding: PaddingSchema.nullish(),
     children: z.array(
       z.lazy((): z.ZodType<SlideElementOutput> => SlideElementSchema),
     ),
@@ -424,6 +447,7 @@ export const ListViewElementSchema: z.ZodType<ListViewElementOutput> = z
     rowGap: z.number().nullish(),
     alignItems: LayoutAlignmentSchema.nullish(),
     justifyContent: LayoutAlignmentSchema.nullish(),
+    padding: PaddingSchema.nullish(),
     count: z.number().min(0),
     item: z.lazy((): z.ZodType<SlideElementOutput> => SlideElementSchema),
     maxCount: z.number().nullish(),
@@ -442,6 +466,7 @@ export const GridViewElementSchema: z.ZodType<GridViewElementOutput> = z
     rowGap: z.number().nullish(),
     alignItems: LayoutAlignmentSchema.nullish(),
     justifyItems: LayoutAlignmentSchema.nullish(),
+    padding: PaddingSchema.nullish(),
     count: z.number().min(0),
     item: z.lazy((): z.ZodType<SlideElementOutput> => SlideElementSchema),
     maxCount: z.number().nullish(),
@@ -588,6 +613,7 @@ export type ChartType = z.infer<typeof ChartTypeSchema>;
 export type Position = z.infer<typeof PositionSchema>;
 export type Size = z.infer<typeof SizeSchema>;
 export type Padding = z.infer<typeof PaddingSchema>;
+export type LayoutItem = z.infer<typeof LayoutItemSchema>;
 export type Alignment = z.infer<typeof AlignmentSchema>;
 export type Font = z.infer<typeof FontSchema>;
 export type Fill = z.infer<typeof FillSchema>;
@@ -638,6 +664,7 @@ export const LayoutChartTypeSchema = ChartTypeSchema;
 export const LayoutPositionSchema = PositionSchema;
 export const LayoutSizeSchema = SizeSchema;
 export const LayoutPaddingSchema = PaddingSchema;
+export const LayoutItemPropsSchema = LayoutItemSchema;
 export const LayoutElementAlignmentSchema = AlignmentSchema;
 export const LayoutFontSchema = FontSchema;
 export const LayoutFillSchema = FillSchema;
@@ -679,6 +706,7 @@ export type LayoutChartType = ChartType;
 export type LayoutPosition = Position;
 export type LayoutSize = Size;
 export type LayoutPadding = Padding;
+export type LayoutItemProps = LayoutItem;
 export type LayoutElementAlignment = Alignment;
 export type LayoutFont = Font;
 export type LayoutFill = Fill;

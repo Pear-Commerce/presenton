@@ -1,5 +1,6 @@
 import { useAtomValue } from "jotai";
 import type { SlideElement } from "../lib/slide-schema";
+import { isLayoutElement } from "../lib/layout-resolver";
 import { editorTheme } from "../editorStyles";
 import { getElementDefinition } from "../registry";
 import { selectedElementOverflowsAtom } from "../state";
@@ -7,6 +8,7 @@ import { ChartInspector } from "./ChartInspector";
 import {
   BulletsInspector,
   ImageInspector,
+  LayoutInspector,
   ShapeInspector,
   SvgInspector,
   TableInspector,
@@ -32,6 +34,18 @@ export function ElementInspector({
   const overflowBanner = overflows ? (
     <OverflowBanner element={element} />
   ) : null;
+
+  if (isLayoutElement(element)) {
+    return (
+      <>
+        {overflowBanner}
+        <LayoutInspector
+          element={element}
+          onPatch={onPatch}
+        />
+      </>
+    );
+  }
 
   if (inspector === "chart" && element.type === "chart") {
     return (

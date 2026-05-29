@@ -7,6 +7,7 @@ import {
 } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import type { SlideElement } from "../lib/slide-schema";
+import { isRootPath, rootPath } from "../lib/element-path";
 import {
   elementBox,
   fillColor,
@@ -40,7 +41,9 @@ import {
   patchSelectedAtom,
   selectedElementAtom,
   selectedIndexAtom,
+  selectedPathAtom,
   updateActiveSlideAtom,
+  updateElementAtPathAtom,
   updateElementAtom,
 } from "../state";
 import { drawerStyles } from "./drawerStyles";
@@ -59,16 +62,18 @@ export function SlideEditorDrawer({
   const activeSlide = useAtomValue(activeSlideAtom);
   const selectedElement = useAtomValue(selectedElementAtom);
   const selectedIndex = useAtomValue(selectedIndexAtom);
-  const selectedComponentRun = getComponentRun(
-    activeSlide.elements,
-    selectedIndex,
-  );
+  const selectedPath = useAtomValue(selectedPathAtom);
+  const selectedComponentRun =
+    selectedPath == null || isRootPath(selectedPath)
+      ? getComponentRun(activeSlide.elements, selectedIndex)
+      : null;
   const selectedGroupedComponentRun =
     selectedComponentRun && selectedComponentRun.indexes.length > 1
       ? selectedComponentRun
       : null;
   const updateActiveSlide = useSetAtom(updateActiveSlideAtom);
   const updateElement = useSetAtom(updateElementAtom);
+  const updateElementAtPath = useSetAtom(updateElementAtPathAtom);
   const patchSelected = useSetAtom(patchSelectedAtom);
   const addElement = useSetAtom(addElementAtom);
   const insertElements = useSetAtom(insertElementsAtom);
@@ -208,7 +213,12 @@ export function SlideEditorDrawer({
             element={selectedElement}
             selectedIndex={selectedIndex}
             onPatch={patchSelected}
-            onReplace={(index, element) => updateElement({ index, element })}
+            onReplace={(index, element) =>
+              updateElementAtPath({
+                path: selectedPath ?? rootPath(index),
+                element,
+              })
+            }
           />
         ) : null}
 

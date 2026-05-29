@@ -1,5 +1,6 @@
 import Konva from "konva";
 import { SLIDE_W, type Slide, type SlideElement } from "../../lib/slide-schema";
+import type { ElementPath } from "../../lib/element-path";
 import { ElementLayer } from "./ElementLayer";
 import { useEditorCanvasInteractions } from "./hooks/useEditorCanvasInteractions";
 import { useKonvaSelection } from "./hooks/useKonvaSelection";
@@ -12,6 +13,7 @@ export function KonvaSlide({
   height,
   interactive,
   selected,
+  selectedPath,
   selectedItems,
   onSelect,
   onSelectMany,
@@ -25,6 +27,7 @@ export function KonvaSlide({
   onEditTable,
   onSelectTableCell,
   onChange,
+  onChangeAtPath,
   onChangeMany,
   stageRef,
   bulletsRenderMode,
@@ -42,23 +45,26 @@ export function KonvaSlide({
   height: number;
   interactive: boolean;
   selected?: number;
+  selectedPath?: ElementPath | null;
   selectedItems?: number[];
-  onSelect?: (index: number, additive?: boolean) => void;
+  onSelect?: (index: number, additive?: boolean, path?: ElementPath) => void;
   onSelectMany?: (indexes: number[]) => void;
   onDelete?: () => void;
-  onEditText?: (index: number) => void;
-  onEditBullets?: (index: number) => void;
-  onEditChart?: (index: number) => void;
+  onEditText?: (index: number, path?: ElementPath) => void;
+  onEditBullets?: (index: number, path?: ElementPath) => void;
+  onEditChart?: (index: number, path?: ElementPath) => void;
   onEditComponentRun?: (indexes: number[]) => void;
-  onEditImage?: (index: number) => void;
-  onEditSvg?: (index: number) => void;
-  onEditTable?: (index: number) => void;
+  onEditImage?: (index: number, path?: ElementPath) => void;
+  onEditSvg?: (index: number, path?: ElementPath) => void;
+  onEditTable?: (index: number, path?: ElementPath) => void;
   onSelectTableCell?: (
     index: number,
     rowIndex: number,
     colIndex: number,
+    path?: ElementPath,
   ) => void;
   onChange?: (index: number, element: SlideElement) => void;
+  onChangeAtPath?: (path: ElementPath, element: SlideElement) => void;
   onChangeMany?: (
     updates: Array<{ index: number; element: SlideElement }>,
   ) => void;
@@ -80,6 +86,8 @@ export function KonvaSlide({
   });
   const resolvedSelected =
     selected ?? (interactive ? editorInteractions.selected : undefined);
+  const resolvedSelectedPath =
+    selectedPath ?? (interactive ? editorInteractions.selectedPath : undefined);
   const resolvedSelectedItems =
     selectedItems ??
     (interactive ? editorInteractions.selectedItems : undefined);
@@ -125,6 +133,9 @@ export function KonvaSlide({
     (interactive ? editorInteractions.onSelectTableCell : undefined);
   const resolvedOnChange =
     onChange ?? (interactive ? editorInteractions.onChange : undefined);
+  const resolvedOnChangeAtPath =
+    onChangeAtPath ??
+    (interactive ? editorInteractions.onChangeAtPath : undefined);
   const resolvedOnChangeMany =
     onChangeMany ?? (interactive ? editorInteractions.onChangeMany : undefined);
   const { nodeRefs, selectedBounds, selectedIndexes, transformerRef } =
@@ -133,6 +144,7 @@ export function KonvaSlide({
       scale,
       selected: resolvedSelected,
       selectedItems: resolvedSelectedItems,
+      selectedPath: resolvedSelectedPath,
       slide,
     });
   const { normalizedSelectionBox, stageHandlers } = useSelectionBox({
@@ -164,6 +176,7 @@ export function KonvaSlide({
         bulletsRenderMode={bulletsRenderMode}
         chartRenderMode={chartRenderMode}
         onChange={resolvedOnChange}
+        onChangeAtPath={resolvedOnChangeAtPath}
         onChangeMany={resolvedOnChangeMany}
         onDelete={resolvedOnDelete}
         onEditBullets={resolvedOnEditBullets}
@@ -179,6 +192,7 @@ export function KonvaSlide({
         scale={scale}
         selectedBounds={selectedBounds}
         selectedIndexes={selectedIndexes}
+        selectedPath={resolvedSelectedPath}
         slide={slide}
         tableRenderMode={tableRenderMode}
         textRenderMode={textRenderMode}

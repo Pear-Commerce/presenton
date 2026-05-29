@@ -514,3 +514,297 @@ export function SvgInspector({
     </>
   );
 }
+
+export function LayoutInspector({
+  element,
+  onPatch,
+}: KindInspectorProps<
+  Extract<
+    SlideElement,
+    {
+      type:
+        | "container"
+        | "flex"
+        | "grid"
+        | "group"
+        | "list-view"
+        | "grid-view";
+    }
+  >
+>) {
+  return (
+    <>
+      <GeometryInspector element={element} onPatch={onPatch} />
+      <form onSubmit={(event) => event.preventDefault()} style={styles.form}>
+        {element.type === "container" ? (
+          <ContainerLayoutControls element={element} onPatch={onPatch} />
+        ) : null}
+        {element.type === "flex" || element.type === "list-view" ? (
+          <FlexLayoutControls element={element} onPatch={onPatch} />
+        ) : null}
+        {element.type === "grid" || element.type === "grid-view" ? (
+          <GridLayoutControls element={element} onPatch={onPatch} />
+        ) : null}
+        {element.type === "flex" ||
+        element.type === "grid" ||
+        element.type === "list-view" ||
+        element.type === "grid-view" ? (
+          <PaddingControls element={element} onPatch={onPatch} />
+        ) : null}
+      </form>
+    </>
+  );
+}
+
+function ContainerLayoutControls({
+  element,
+  onPatch,
+}: KindInspectorProps<Extract<SlideElement, { type: "container" }>>) {
+  const fill = element.fill ?? { color: "FFFFFF" };
+  const stroke = element.stroke ?? { color: "D9E2EF", width: 0 };
+
+  return (
+    <>
+      <div style={styles.grid2}>
+        <ColorField
+          label="Fill"
+          value={fill.color}
+          onChange={(color) =>
+            onPatch({ fill: { ...fill, color } } as Partial<SlideElement>)
+          }
+        />
+        <ColorField
+          label="Stroke"
+          value={stroke.color}
+          onChange={(color) =>
+            onPatch({
+              stroke: {
+                ...stroke,
+                color,
+                width: Math.max(0.5, stroke.width || 1),
+              },
+            } as Partial<SlideElement>)
+          }
+        />
+      </div>
+      <div style={styles.grid2}>
+        <NumberField
+          label="Stroke width"
+          min={0}
+          max={8}
+          step={0.25}
+          value={stroke.width}
+          onChange={(width) =>
+            onPatch({
+              stroke: width > 0 ? { ...stroke, width } : undefined,
+            } as Partial<SlideElement>)
+          }
+        />
+        <NumberField
+          label="Radius"
+          min={0}
+          max={0.5}
+          step={0.01}
+          value={averageBorderRadius(element.borderRadius)}
+          onChange={(radius) =>
+            onPatch({
+              borderRadius: uniformBorderRadius(radius),
+            } as Partial<SlideElement>)
+          }
+        />
+      </div>
+      <PaddingControls element={element} onPatch={onPatch} />
+    </>
+  );
+}
+
+function FlexLayoutControls({
+  element,
+  onPatch,
+}: KindInspectorProps<
+  Extract<SlideElement, { type: "flex" | "list-view" }>
+>) {
+  return (
+    <>
+      <div style={styles.grid2}>
+        <SelectField
+          label="Direction"
+          value={element.direction ?? "column"}
+          options={[
+            { label: "Row", value: "row" },
+            { label: "Column", value: "column" },
+          ]}
+          onChange={(direction) =>
+            onPatch({ direction } as Partial<SlideElement>)
+          }
+        />
+        <NumberField
+          label="Gap"
+          min={0}
+          max={2}
+          step={0.05}
+          value={element.gap ?? 0}
+          onChange={(gap) => onPatch({ gap } as Partial<SlideElement>)}
+        />
+      </div>
+      <div style={styles.grid2}>
+        <SelectField
+          label="Align"
+          value={element.alignItems ?? "stretch"}
+          options={layoutAlignmentOptions}
+          onChange={(alignItems) =>
+            onPatch({ alignItems } as Partial<SlideElement>)
+          }
+        />
+        <SelectField
+          label="Justify"
+          value={element.justifyContent ?? "flex-start"}
+          options={layoutAlignmentOptions}
+          onChange={(justifyContent) =>
+            onPatch({ justifyContent } as Partial<SlideElement>)
+          }
+        />
+      </div>
+      {element.type === "flex" ? (
+        <CheckboxField
+          label="Wrap items"
+          checked={element.wrap ?? false}
+          onChange={(wrap) => onPatch({ wrap } as Partial<SlideElement>)}
+        />
+      ) : (
+        <NumberField
+          label="Count"
+          min={0}
+          max={24}
+          step={1}
+          value={element.count}
+          onChange={(count) => onPatch({ count } as Partial<SlideElement>)}
+        />
+      )}
+    </>
+  );
+}
+
+function GridLayoutControls({
+  element,
+  onPatch,
+}: KindInspectorProps<Extract<SlideElement, { type: "grid" | "grid-view" }>>) {
+  return (
+    <>
+      <div style={styles.grid2}>
+        <NumberField
+          label="Columns"
+          min={1}
+          max={12}
+          step={1}
+          value={element.columns}
+          onChange={(columns) =>
+            onPatch({ columns } as Partial<SlideElement>)
+          }
+        />
+        <NumberField
+          label="Rows"
+          min={1}
+          max={12}
+          step={1}
+          value={element.rows ?? 1}
+          onChange={(rows) => onPatch({ rows } as Partial<SlideElement>)}
+        />
+      </div>
+      <div style={styles.grid2}>
+        <NumberField
+          label="Gap"
+          min={0}
+          max={2}
+          step={0.05}
+          value={element.gap ?? 0}
+          onChange={(gap) => onPatch({ gap } as Partial<SlideElement>)}
+        />
+        {element.type === "grid-view" ? (
+          <NumberField
+            label="Count"
+            min={0}
+            max={48}
+            step={1}
+            value={element.count}
+            onChange={(count) => onPatch({ count } as Partial<SlideElement>)}
+          />
+        ) : (
+          <SelectField
+            label="Items"
+            value={element.justifyItems ?? "stretch"}
+            options={layoutAlignmentOptions}
+            onChange={(justifyItems) =>
+              onPatch({ justifyItems } as Partial<SlideElement>)
+            }
+          />
+        )}
+      </div>
+      <SelectField
+        label="Align"
+        value={element.alignItems ?? "stretch"}
+        options={layoutAlignmentOptions}
+        onChange={(alignItems) =>
+          onPatch({ alignItems } as Partial<SlideElement>)
+        }
+      />
+    </>
+  );
+}
+
+function PaddingControls({
+  element,
+  onPatch,
+}: KindInspectorProps<
+  Extract<
+    SlideElement,
+    { type: "container" | "flex" | "grid" | "list-view" | "grid-view" }
+  >
+>) {
+  const padding = element.padding ?? { top: 0, right: 0, bottom: 0, left: 0 };
+  const patchPadding = (next: Partial<typeof padding>) =>
+    onPatch({ padding: { ...padding, ...next } } as Partial<SlideElement>);
+
+  return (
+    <div style={styles.grid2}>
+      <NumberField
+        label="Pad top"
+        min={0}
+        max={2}
+        value={padding.top}
+        onChange={(top) => patchPadding({ top })}
+      />
+      <NumberField
+        label="Pad right"
+        min={0}
+        max={2}
+        value={padding.right}
+        onChange={(right) => patchPadding({ right })}
+      />
+      <NumberField
+        label="Pad bottom"
+        min={0}
+        max={2}
+        value={padding.bottom}
+        onChange={(bottom) => patchPadding({ bottom })}
+      />
+      <NumberField
+        label="Pad left"
+        min={0}
+        max={2}
+        value={padding.left}
+        onChange={(left) => patchPadding({ left })}
+      />
+    </div>
+  );
+}
+
+const layoutAlignmentOptions = [
+  { label: "Start", value: "flex-start" },
+  { label: "Center", value: "center" },
+  { label: "End", value: "flex-end" },
+  { label: "Stretch", value: "stretch" },
+] as Array<{
+  label: string;
+  value: "flex-start" | "center" | "flex-end" | "stretch";
+}>;

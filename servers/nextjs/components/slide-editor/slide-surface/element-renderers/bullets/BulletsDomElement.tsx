@@ -1,6 +1,7 @@
 import { useMemo, type CSSProperties } from "react";
-import type { Slide } from "../../../lib/slide-schema";
 import { textListStrings } from "../../../lib/element-model";
+import { rootPath, type ElementPath } from "../../../lib/element-path";
+import type { ResolvedLayoutItem } from "../../../lib/layout-resolver";
 import { fitBulletsFontToBox } from "../../../lib/textMeasure";
 import {
   DomElementLayer,
@@ -11,42 +12,47 @@ import {
 
 export function BulletsDomElement({
   editingBulletsIndex,
+  editingBulletsPath,
+  items,
   scale,
-  slide,
 }: {
   editingBulletsIndex?: number | null;
+  editingBulletsPath?: ElementPath | null;
+  items: ResolvedLayoutItem[];
   scale: number;
-  slide: Slide;
 }) {
+  const editingPath =
+    editingBulletsPath ??
+    (editingBulletsIndex != null ? rootPath(editingBulletsIndex) : null);
+
   // Pre-compute the effective fontSize for every bullets element on this
   // slide. Same rationale as TextDomElement: the DOM overlay is what the
   // user sees in the editor, so without shrinking here the preview
   // overflows while presentation/export views auto-fit.
   const effectiveFontSizes = useMemo(() => {
-    const sizes = new Map<number, number>();
-    slide.elements.forEach((element, index) => {
+    const sizes = new Map<string, number>();
+    items.forEach((item) => {
+      const element = item.element;
       if (element.type !== "text-list") return;
-      sizes.set(index, fitBulletsFontToBox(element));
+      sizes.set(item.path, fitBulletsFontToBox(element));
     });
     return sizes;
-  }, [slide]);
+  }, [items]);
 
   return (
     <DomElementLayer>
-      {slide.elements.map((element, elementIndex) => {
-        if (
-          element.type !== "text-list" ||
-          editingBulletsIndex === elementIndex
-        ) {
+      {items.map((item) => {
+        const element = item.element;
+        if (element.type !== "text-list" || item.sourcePath === editingPath) {
           return null;
         }
         const effective =
-          effectiveFontSizes.get(elementIndex) ?? element.font?.size;
+          effectiveFontSizes.get(item.path) ?? element.font?.size;
         const items = textListStrings(element);
 
         return (
           <ListTag
-            key={elementIndex}
+            key={item.path}
             style={{
               ...elementBoxStyle(element, scale),
               ...fontStyle(

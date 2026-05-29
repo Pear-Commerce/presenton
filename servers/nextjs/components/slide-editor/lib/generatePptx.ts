@@ -7,7 +7,6 @@ import {
   type Shadow,
   type Slide,
   type SlideElement,
-  type TableCell,
   type TableElement,
   type TextListElement,
 } from "../lib/slide-schema";
@@ -26,6 +25,11 @@ import {
   strokeWidth,
   textListStrings,
 } from "./element-model";
+import {
+  isLayoutElement,
+  resolveElementLayout,
+  resolveSlideLayout,
+} from "./layout-resolver";
 import {
   fitBulletsFontToBox,
   fitFontToBox,
@@ -626,6 +630,34 @@ function addElement(
     return;
   }
 
+  if (el.type === "container") {
+    const rx = averageBorderRadius(el.borderRadius);
+    const rounded = rx > 0;
+    const shape = rounded ? pptx.ShapeType.roundRect : pptx.ShapeType.rect;
+    const opts: PptxGenJS.ShapeProps = {
+      x: box.x,
+      y: box.y,
+      w: box.w,
+      h: box.h,
+      rotate: el.rotation ?? undefined,
+      shadow: pptxShadow(el.shadow),
+      fill: el.fill
+        ? {
+            color: fillColor(el.fill, "FFFFFF"),
+            transparency: transparencyPct(el.opacity ?? el.fill.opacity ?? undefined),
+          }
+        : { color: "FFFFFF", transparency: 100 },
+      line: el.stroke
+        ? { color: strokeColor(el.stroke), width: strokeWidth(el.stroke) }
+        : { type: "none" },
+    };
+    if (rounded) {
+      opts.rectRadius = Math.min(0.5, rx / Math.min(box.w, box.h));
+    }
+    s.addShape(shape, opts);
+    return;
+  }
+
   if (el.type === "ellipse") {
     s.addShape(pptx.ShapeType.ellipse, {
       x: box.x,
@@ -777,18 +809,13 @@ function addElement(
     return;
   }
 
-  if (el.type === "container") {
-    if (el.child) addElement(pptx, s, el.child, bg, options);
-    return;
-  }
-
-  if (el.type === "flex" || el.type === "grid" || el.type === "group") {
-    el.children.forEach((child) => addElement(pptx, s, child, bg, options));
-    return;
-  }
-
-  if (el.type === "list-view" || el.type === "grid-view") {
-    addElement(pptx, s, el.item, bg, options);
+  if (isLayoutElement(el)) {
+    resolveElementLayout(el, {
+      rootIndex: 0,
+      path: "0",
+      parentPath: null,
+      depth: 0,
+    }).forEach((item) => addElement(pptx, s, item.element, bg, options));
   }
 }
 
@@ -837,7 +864,9 @@ async function addSlide(
       transparency: transparencyPct(slide.backgroundImage.opacity ?? undefined),
     });
   }
-  for (const el of slide.elements) addElement(pptx, s, el, slide.background, options);
+  for (const item of resolveSlideLayout(slide)) {
+    addElement(pptx, s, item.element, slide.background, options);
+  }
 }
 
 export async function generatePptx(
