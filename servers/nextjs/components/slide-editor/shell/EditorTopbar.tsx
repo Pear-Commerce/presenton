@@ -63,67 +63,76 @@ export function EditorTopbar({
         </div>
       </div>
       <div style={layoutStyles.toolbar}>
-        {toolbarLeading}
-        <button
-          type="button"
-          onClick={handleSave}
-          style={styles.primaryButton}
-          title="Log current deck JSON"
-        >
-          <Save size={15} aria-hidden="true" />
-          Save
-        </button>
-        <input
-          ref={pptxInputRef}
-          type="file"
-          accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
-          onChange={handleImportChange}
-          style={{ display: "none" }}
-        />
-        <button
-          type="button"
-          disabled={importingPptx}
-          onClick={() => pptxInputRef.current?.click()}
-          style={styles.ghostButton}
-          title="Import PPTX"
-        >
-          <FileUp size={15} aria-hidden="true" />
-          {importingPptx ? "Importing..." : "Import PPTX"}
-        </button>
-        <button
-          type="button"
-          onClick={onOpenTheme}
-          style={styles.ghostButton}
-          title="Configure deck theme"
-        >
-          <Palette size={15} aria-hidden="true" />
-          Theme
-        </button>
-        <button
-          type="button"
-          onClick={() => setPresenting(true)}
-          style={styles.ghostButton}
-          title="Start presentation (fullscreen)"
-        >
-          <Play size={15} aria-hidden="true" />
-          Slide Show
-        </button>
-        <button
-          type="button"
-          disabled={isExporting}
-          onClick={onPdfExport}
-          style={styles.secondaryButton}
-        >
-          <FileText size={15} aria-hidden="true" />
-          {exportingType === "pdf" ? "Exporting PDF..." : "Export PDF"}
-        </button>
-        <ExportPptxButton
-          mode={exportMode}
-          onModeChange={setExportMode}
-          onExport={onExport}
-          isExporting={isExporting}
-          exportingLabel={exportingType === "pptx" ? "Exporting PPTX..." : null}
-        />
+        {toolbarLeading ? (
+          <div style={layoutStyles.toolbarGroup}>{toolbarLeading}</div>
+        ) : null}
+        <div style={layoutStyles.toolbarGroup}>
+          <button
+            type="button"
+            onClick={handleSave}
+            style={styles.toolbarPrimaryButton}
+            title="Log current deck JSON"
+          >
+            <Save size={15} aria-hidden="true" />
+            Save
+          </button>
+          <input
+            ref={pptxInputRef}
+            type="file"
+            accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            onChange={handleImportChange}
+            style={{ display: "none" }}
+          />
+          <button
+            type="button"
+            disabled={importingPptx}
+            onClick={() => pptxInputRef.current?.click()}
+            style={styles.toolbarSecondaryButton}
+            title="Import PPTX"
+          >
+            <FileUp size={15} aria-hidden="true" />
+            {importingPptx ? "Importing..." : "Import"}
+          </button>
+        </div>
+        <div style={layoutStyles.toolbarGroup}>
+          <button
+            type="button"
+            onClick={onOpenTheme}
+            style={styles.toolbarButton}
+            title="Configure deck theme"
+          >
+            <Palette size={15} aria-hidden="true" />
+            Theme
+          </button>
+          <button
+            type="button"
+            onClick={() => setPresenting(true)}
+            style={styles.toolbarButton}
+            title="Start presentation"
+          >
+            <Play size={15} aria-hidden="true" />
+            Present
+          </button>
+        </div>
+        <div style={layoutStyles.toolbarGroup}>
+          <button
+            type="button"
+            disabled={isExporting}
+            onClick={onPdfExport}
+            style={styles.toolbarSecondaryButton}
+            title="Export PDF"
+          >
+            <FileText size={15} aria-hidden="true" />
+            {exportingType === "pdf" ? "Exporting..." : "PDF"}
+          </button>
+          <ExportPptxButton
+            mode={exportMode}
+            onModeChange={setExportMode}
+            onExport={onExport}
+            isExporting={isExporting}
+            exportingLabel={exportingType === "pptx" ? "Exporting..." : null}
+          />
+        </div>
       </div>
     </div>
   );

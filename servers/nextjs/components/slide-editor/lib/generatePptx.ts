@@ -4,9 +4,11 @@ import {
   SLIDE_W,
   type ChartElement,
   type Deck,
+  type Fill,
   type Shadow,
   type Slide,
   type SlideElement,
+  type Stroke,
   type TableElement,
   type TextListElement,
 } from "../lib/slide-schema";
@@ -18,6 +20,7 @@ import {
 import { sanitizeSvgMarkup } from "../lib/svg-sanitize";
 import {
   averageBorderRadius,
+  type ElementBox,
   elementBox,
   elementFont,
   fillColor,
@@ -45,6 +48,51 @@ export type GeneratePptxOptions = {
 function transparencyPct(opacity?: number): number {
   if (opacity == null) return 0;
   return Math.max(0, Math.min(100, Math.round((1 - opacity) * 100)));
+}
+
+function combinedOpacity(
+  ...values: Array<number | null | undefined>
+): number | undefined {
+  let opacity = 1;
+  let hasOpacity = false;
+  for (const value of values) {
+    if (value == null) continue;
+    opacity *= Math.max(0, Math.min(1, value));
+    hasOpacity = true;
+  }
+  return hasOpacity ? opacity : undefined;
+}
+
+function fillTransparency(
+  fill: Fill | null | undefined,
+  opacity: number | null | undefined,
+): number {
+  return transparencyPct(combinedOpacity(opacity, fill?.opacity));
+}
+
+function strokeTransparency(
+  stroke: Stroke | null | undefined,
+  opacity: number | null | undefined,
+): number {
+  return transparencyPct(combinedOpacity(opacity, stroke?.opacity));
+}
+
+function pptxBoxForRotation(box: ElementBox, rotation?: number | null): ElementBox {
+  if (rotation == null || Math.abs(rotation) < 0.01) return box;
+  const radians = (rotation * Math.PI) / 180;
+  const halfW = box.w / 2;
+  const halfH = box.h / 2;
+  const rotatedHalfX = Math.cos(radians) * halfW - Math.sin(radians) * halfH;
+  const rotatedHalfY = Math.sin(radians) * halfW + Math.cos(radians) * halfH;
+  return {
+    ...box,
+    x: box.x + rotatedHalfX - halfW,
+    y: box.y + rotatedHalfY - halfH,
+  };
+}
+
+function pptxElementBox(el: Pick<SlideElement, "position" | "size" | "rotation">) {
+  return pptxBoxForRotation(elementBox(el), el.rotation);
 }
 
 function svgDataUri(svg: string): string {
@@ -601,7 +649,7 @@ function addElement(
   bg: string,
   options: Required<GeneratePptxOptions>,
 ): void {
-  const box = elementBox(el);
+  const box = pptxElementBox(el);
 
   if (el.type === "rectangle") {
     const rx = averageBorderRadius(el.borderRadius);
@@ -614,12 +662,18 @@ function addElement(
       h: box.h,
       rotate: el.rotation ?? undefined,
       shadow: pptxShadow(el.shadow),
-      fill: {
-        color: fillColor(el.fill, "FFFFFF"),
-        transparency: transparencyPct(el.opacity ?? undefined),
-      },
+      fill: el.fill
+        ? {
+            color: fillColor(el.fill, "FFFFFF"),
+            transparency: fillTransparency(el.fill, el.opacity),
+          }
+        : { type: "none" },
       line: el.stroke
-        ? { color: strokeColor(el.stroke), width: strokeWidth(el.stroke) }
+        ? {
+            color: strokeColor(el.stroke),
+            width: strokeWidth(el.stroke),
+            transparency: strokeTransparency(el.stroke, el.opacity),
+          }
         : { type: "none" },
     };
     if (rounded) {
@@ -644,11 +698,15 @@ function addElement(
       fill: el.fill
         ? {
             color: fillColor(el.fill, "FFFFFF"),
-            transparency: transparencyPct(el.opacity ?? el.fill.opacity ?? undefined),
+            transparency: fillTransparency(el.fill, el.opacity),
           }
         : { color: "FFFFFF", transparency: 100 },
       line: el.stroke
-        ? { color: strokeColor(el.stroke), width: strokeWidth(el.stroke) }
+        ? {
+            color: strokeColor(el.stroke),
+            width: strokeWidth(el.stroke),
+            transparency: strokeTransparency(el.stroke, el.opacity),
+          }
         : { type: "none" },
     };
     if (rounded) {
@@ -666,12 +724,18 @@ function addElement(
       h: box.h,
       rotate: el.rotation ?? undefined,
       shadow: pptxShadow(el.shadow),
-      fill: {
-        color: fillColor(el.fill, "FFFFFF"),
-        transparency: transparencyPct(el.opacity ?? undefined),
-      },
+      fill: el.fill
+        ? {
+            color: fillColor(el.fill, "FFFFFF"),
+            transparency: fillTransparency(el.fill, el.opacity),
+          }
+        : { type: "none" },
       line: el.stroke
-        ? { color: strokeColor(el.stroke), width: strokeWidth(el.stroke) }
+        ? {
+            color: strokeColor(el.stroke),
+            width: strokeWidth(el.stroke),
+            transparency: strokeTransparency(el.stroke, el.opacity),
+          }
         : { type: "none" },
     });
     return;
@@ -685,7 +749,11 @@ function addElement(
       h: box.h,
       rotate: el.rotation ?? undefined,
       shadow: pptxShadow(el.shadow),
-      line: { color: strokeColor(el.stroke), width: strokeWidth(el.stroke) },
+      line: {
+        color: strokeColor(el.stroke),
+        width: strokeWidth(el.stroke),
+        transparency: strokeTransparency(el.stroke, el.opacity),
+      },
     });
     return;
   }

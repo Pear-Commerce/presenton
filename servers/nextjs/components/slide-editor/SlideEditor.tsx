@@ -322,8 +322,11 @@ function useEditorHotkeys() {
 
 const templateSelectStyle = {
   ...styles.input,
-  width: 190,
-  height: 36,
-  padding: "0 10px",
-  fontWeight: 700,
+  width: 220,
+  height: 32,
+  padding: "0 8px",
+  border: "1px solid transparent",
+  background: "transparent",
+  boxShadow: "none",
+  fontWeight: 750,
 } satisfies CSSProperties;

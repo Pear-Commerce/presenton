@@ -73,7 +73,7 @@ export function ExportPptxButton({
         style={styles.splitButtonMain}
         title={`Export as ${activeOption.label}`}
       >
-        {exportingLabel ?? `Export PPTX · ${activeLabel}`}
+        {exportingLabel ?? `PPTX · ${activeLabel}`}
       </button>
       <button
         type="button"

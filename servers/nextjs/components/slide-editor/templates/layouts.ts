@@ -32,6 +32,7 @@ type RawElement = Record<string, unknown> & {
   font?: RawFont | null;
   item?: RawElement | null;
   position?: RawPosition | null;
+  rotation?: number | null;
   runs?: Array<{ text: string; font?: RawFont | null }>;
   size?: RawSize | null;
   stroke?: RawStroke | null;
@@ -87,14 +88,20 @@ function adaptLayoutToSlide(layout: RawSlideLayout, index: number): Slide {
 function adaptElement(element: RawElement, offset: RawPosition): SlideElement {
   const next: Record<string, unknown> = { ...element };
   const noWrapText = isPageNumberLabel(elementText(element));
+  const position = element.position
+    ? scalePosition({
+        x: element.position.x + offset.x,
+        y: element.position.y + offset.y,
+      })
+    : null;
+  const size = element.size ? scaleSize(element.size) : null;
 
-  if (element.position) {
-    next.position = scalePosition({
-      x: element.position.x + offset.x,
-      y: element.position.y + offset.y,
-    });
+  if (position) {
+    next.position = size
+      ? konvaPositionForPowerPointRotation(position, size, element.rotation)
+      : position;
   }
-  if (element.size) next.size = scaleSize(element.size);
+  if (size) next.size = size;
   if (element.font) next.font = scaleFont(element.font, noWrapText);
   if (element.stroke) next.stroke = scaleStroke(element.stroke);
   if (element.shadow) next.shadow = scaleShadow(element.shadow);
@@ -129,6 +136,23 @@ function scaleSize(size: RawSize): Size {
   return {
     width: round(size.width * X_SCALE),
     height: round(size.height * Y_SCALE),
+  };
+}
+
+function konvaPositionForPowerPointRotation(
+  position: Position,
+  size: Size,
+  rotation?: number | null,
+): Position {
+  if (rotation == null || Math.abs(rotation) < 0.01) return position;
+  const radians = (rotation * Math.PI) / 180;
+  const halfW = size.width / 2;
+  const halfH = size.height / 2;
+  const rotatedHalfX = Math.cos(radians) * halfW - Math.sin(radians) * halfH;
+  const rotatedHalfY = Math.sin(radians) * halfW + Math.cos(radians) * halfH;
+  return {
+    x: round(position.x + halfW - rotatedHalfX),
+    y: round(position.y + halfH - rotatedHalfY),
   };
 }
 
