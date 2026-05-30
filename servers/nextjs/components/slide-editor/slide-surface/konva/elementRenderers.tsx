@@ -6,6 +6,7 @@ import { ChartElement } from "./ChartElement";
 import { ContainerElement } from "./ContainerElement";
 import { EllipseElement } from "./EllipseElement";
 import { ImageElement } from "./ImageElement";
+import { LineElement } from "./LineElement";
 import { RectElement } from "./RectElement";
 import { SvgElement } from "./SvgElement";
 import { TableElement } from "./TableElement";
@@ -36,6 +37,8 @@ const KONVA_RENDERERS = {
     element.type === "ellipse" ? (
       <EllipseElement element={element} {...rest} />
     ) : null,
+  line: ({ element, ...rest }) =>
+    element.type === "line" ? <LineElement element={element} {...rest} /> : null,
   chart: ({ chartRenderMode, element, ...rest }) =>
     element.type === "chart" ? (
       <ChartElement element={element} renderMode={chartRenderMode} {...rest} />

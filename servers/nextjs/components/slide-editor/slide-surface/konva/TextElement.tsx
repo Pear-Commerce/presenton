@@ -69,7 +69,7 @@ export function TextElement({
           letterSpacing={
             ((font.letterSpacing ?? 0) / 100) * PT_TO_PX * (scale / PX_PER_IN)
           }
-          wrap="word"
+          wrap={font.wrap ?? "word"}
           listening={false}
         />
       )}

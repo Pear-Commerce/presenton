@@ -3,6 +3,7 @@ import type { RectElement as RectEl } from "../../lib/slide-schema";
 import { withHash } from "../../editorUtils";
 import { fillColor } from "../../lib/element-model";
 import {
+  colorWithOpacity,
   konvaCornerRadius,
   rotationProps,
   shadowProps,
@@ -31,7 +32,7 @@ export function RectElement({
       width={width}
       height={height}
       {...rotationProps(element)}
-      fill={withHash(fillColor(element.fill))}
+      fill={colorWithOpacity(fillColor(element.fill), element.fill?.opacity)}
       opacity={element.opacity ?? 1}
       cornerRadius={konvaCornerRadius(element, scale)}
       stroke={element.stroke ? withHash(element.stroke.color) : stroke}

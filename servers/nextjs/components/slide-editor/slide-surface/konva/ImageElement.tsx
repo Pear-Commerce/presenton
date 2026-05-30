@@ -90,7 +90,7 @@ function SlideImagePicture({
 
   const image = loaded && loaded.src === element.data ? loaded.image : null;
 
-  if (!image) return null;
+  if (!image) return <ImagePlaceholder width={width} height={height} />;
 
   const fit = element.fit ?? "contain";
   const naturalRatio = image.width / image.height || 1;

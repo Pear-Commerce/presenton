@@ -1,6 +1,6 @@
 import { useAtom, useAtomValue } from "jotai";
-import { FileText, Palette, Play, Save } from "lucide-react";
-import type { ReactNode } from "react";
+import { FileText, FileUp, Palette, Play, Save } from "lucide-react";
+import { useRef, type ChangeEvent, type ReactNode } from "react";
 import { styles } from "../editorStyles";
 import { truncateWords } from "../editorUtils";
 import { ExportPptxButton } from "../shared/ExportPptxButton";
@@ -18,14 +18,18 @@ type EditorTopbarProps = {
   exportingType: "pptx" | "pdf" | null;
   onExport: () => void;
   onPdfExport: () => void;
+  onImportPptx: (file: File) => void;
   onOpenTheme: () => void;
+  importingPptx?: boolean;
   toolbarLeading?: ReactNode;
 };
 
 export function EditorTopbar({
   exportingType,
+  importingPptx = false,
   onExport,
   onPdfExport,
+  onImportPptx,
   onOpenTheme,
   toolbarLeading,
 }: EditorTopbarProps) {
@@ -35,8 +39,15 @@ export function EditorTopbar({
   const isExporting = useAtomValue(isExportingAtom);
   const [exportMode, setExportMode] = useAtom(exportModeAtom);
   const [, setPresenting] = useAtom(presentingAtom);
+  const pptxInputRef = useRef<HTMLInputElement | null>(null);
   const handleSave = () => {
     console.log(JSON.stringify(deck, null, 2));
+  };
+  const handleImportChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    onImportPptx(file);
   };
 
   return (
@@ -61,6 +72,23 @@ export function EditorTopbar({
         >
           <Save size={15} aria-hidden="true" />
           Save
+        </button>
+        <input
+          ref={pptxInputRef}
+          type="file"
+          accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+          onChange={handleImportChange}
+          style={{ display: "none" }}
+        />
+        <button
+          type="button"
+          disabled={importingPptx}
+          onClick={() => pptxInputRef.current?.click()}
+          style={styles.ghostButton}
+          title="Import PPTX"
+        >
+          <FileUp size={15} aria-hidden="true" />
+          {importingPptx ? "Importing..." : "Import PPTX"}
         </button>
         <button
           type="button"

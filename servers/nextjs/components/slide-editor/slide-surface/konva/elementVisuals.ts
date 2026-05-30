@@ -32,6 +32,15 @@ export function shadowProps(shadow?: Shadow | null, scale = 1) {
   };
 }
 
+export function colorWithOpacity(color: string, opacity?: number | null) {
+  if (opacity == null || opacity >= 1) return withHash(color);
+  const hex = color.replace("#", "");
+  const red = parseInt(hex.slice(0, 2), 16);
+  const green = parseInt(hex.slice(2, 4), 16);
+  const blue = parseInt(hex.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
+}
+
 export function rotationProps(element: Pick<SlideElement, "rotation">) {
   return { rotation: element.rotation ?? 0 };
 }

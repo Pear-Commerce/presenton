@@ -185,6 +185,20 @@ export const ELEMENT_REGISTRY = {
       fill: { color: "75AADB" },
     }),
   },
+  line: {
+    label: "Line",
+    addable: false,
+    toolbar: null,
+    inspector: null,
+    renderers: { konva: "line", domOverlay: null },
+    export: { pptx: "line", pdf: "raster" },
+    createDefault: () => ({
+      ...base,
+      size: { width: 2.6, height: 0.01 },
+      type: "line",
+      stroke: { color: "172033", width: 1 },
+    }),
+  },
   chart: {
     label: "Chart",
     addable: true,

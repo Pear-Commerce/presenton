@@ -3,6 +3,7 @@ import type { ComponentTemplate } from "../componentTemplates";
 import { cybersecurityBusinessDeck } from "./cybersecurity-business";
 import { ezsecurityPitchDeck } from "./ezsecurity-pitch";
 import { layoutKitDeck } from "./layout-kit";
+import { layoutsJsonDeck } from "./layouts";
 
 export type TemplateDescriptor = {
   id: string;
@@ -21,6 +22,13 @@ export const TEMPLATES: ReadonlyArray<TemplateDescriptor> = [
     deck: layoutKitDeck,
   },
   {
+    id: "layouts-json",
+    label: "Converted Layouts",
+    description:
+      "PPTX-derived layouts adapted from layouts.json into editable slides.",
+    deck: layoutsJsonDeck,
+  },
+  {
     id: "cybersecurity-business",
     label: "Exec Review",
     description:
@@ -36,4 +44,9 @@ export const TEMPLATES: ReadonlyArray<TemplateDescriptor> = [
   },
 ];
 
-export { cybersecurityBusinessDeck, ezsecurityPitchDeck, layoutKitDeck };
+export {
+  cybersecurityBusinessDeck,
+  ezsecurityPitchDeck,
+  layoutKitDeck,
+  layoutsJsonDeck,
+};

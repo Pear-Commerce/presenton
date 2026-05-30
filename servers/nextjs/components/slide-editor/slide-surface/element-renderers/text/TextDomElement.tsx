@@ -62,6 +62,9 @@ export function TextDomElement({
                 scale,
               ),
               ...textBoxStyle,
+              whiteSpace: element.font?.wrap === "none" ? "pre" : "pre-wrap",
+              wordBreak:
+                element.font?.wrap === "none" ? "normal" : "break-word",
               alignItems:
                 valign === "middle"
                   ? "center"

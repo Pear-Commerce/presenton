@@ -2,7 +2,7 @@ import { Ellipse } from "react-konva";
 import type { EllipseElement as EllipseEl } from "../../lib/slide-schema";
 import { withHash } from "../../editorUtils";
 import { fillColor } from "../../lib/element-model";
-import { rotationProps, shadowProps } from "./elementVisuals";
+import { colorWithOpacity, rotationProps, shadowProps } from "./elementVisuals";
 import { geometry, type ElementCommonProps } from "./types";
 
 export function EllipseElement({
@@ -29,7 +29,7 @@ export function EllipseElement({
       radiusX={width / 2}
       radiusY={height / 2}
       {...rotationProps(element)}
-      fill={withHash(fillColor(element.fill))}
+      fill={colorWithOpacity(fillColor(element.fill), element.fill?.opacity)}
       opacity={element.opacity ?? 1}
       stroke={element.stroke ? withHash(element.stroke.color) : stroke}
       strokeWidth={element.stroke ? element.stroke.width : strokeWidth}

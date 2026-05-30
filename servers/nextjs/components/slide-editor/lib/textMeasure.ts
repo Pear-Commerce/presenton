@@ -62,6 +62,7 @@ export type TextLayoutSpec = FontFaceSpec & {
   fontSize: number;
   lineHeight?: number | null;
   charSpacing?: number | null;
+  wrap?: "word" | "char" | "none" | null;
   /** Box width in inches. */
   w: number;
 };
@@ -77,6 +78,7 @@ function textLayoutSpec(element: TextElement): TextLayoutSpec {
     italic: font.italic,
     lineHeight: font.lineHeight,
     charSpacing: font.letterSpacing,
+    wrap: font.wrap,
     w: box.w,
   };
 }
@@ -139,6 +141,7 @@ export function fitFontToBox(
   heightInches: number,
 ): number {
   const spec = normalizeTextSpec(input);
+  if (spec.wrap === "none") return spec.fontSize;
   if (typeof window === "undefined") return spec.fontSize;
   const target = Math.max(0.05, heightInches - FIT_SAFETY_GAP_IN);
   const measure = (size: number) =>
@@ -233,6 +236,7 @@ export function fitBulletsFontToBox(el: BulletsElement): number {
  */
 export function wrapTextElementLines(el: TextElement): string[] {
   const spec = textLayoutSpec(el);
+  if (spec.wrap === "none") return [spec.text];
   if (typeof window === "undefined") return [spec.text];
   const fontSizePx = spec.fontSize * PT_TO_PX;
   const lhMul = spec.lineHeight ?? DEFAULT_LINE_HEIGHT;

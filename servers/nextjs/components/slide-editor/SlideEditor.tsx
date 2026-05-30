@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Deck } from "./lib/slide-schema";
+import { importPptxFile } from "./lib/pptx-import";
 import { TEMPLATES, layoutKitDeck } from "./templates";
 import {
   createSlideTemplatesFromDeck,
@@ -50,6 +51,8 @@ import {
   undoAtom,
 } from "./state";
 import { styles } from "./editorStyles";
+
+const IMPORTED_TEMPLATE_ID = "__imported-pptx";
 
 export function SlideEditor({
   componentTemplates,
@@ -110,6 +113,7 @@ function SlideEditorBody({
   const [selectedTemplateId, setSelectedTemplateId] = useState(initialTemplateId);
   const [themeOpen, setThemeOpen] = useState(false);
   const [slideLayoutOpen, setSlideLayoutOpen] = useState(false);
+  const [importingPptx, setImportingPptx] = useState(false);
   const insertSlide = useSetAtom(insertSlideAtom);
   const { stageWidth, stageWrapRef } = useStageSize();
   const { exportStageRefs, exportingType, handleExport, handlePdfExport } =
@@ -123,13 +127,18 @@ function SlideEditorBody({
   const resolvedSlideTemplates = useMemo(
     () =>
       slideTemplates ??
-      createSlideTemplatesFromDeck(selectedTemplate?.deck ?? initialDeck),
-    [initialDeck, selectedTemplate, slideTemplates],
+      createSlideTemplatesFromDeck(
+        selectedTemplateId === IMPORTED_TEMPLATE_ID
+          ? deck
+          : (selectedTemplate?.deck ?? initialDeck),
+      ),
+    [deck, initialDeck, selectedTemplate, selectedTemplateId, slideTemplates],
   );
   const resolvedComponentTemplates =
     componentTemplates ?? selectedTemplate?.componentTemplates ?? [];
 
   const handleTemplateChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    if (event.target.value === IMPORTED_TEMPLATE_ID) return;
     const nextTemplate = TEMPLATES.find(
       (template) => template.id === event.target.value,
     );
@@ -145,6 +154,34 @@ function SlideEditorBody({
     setSlideLayoutOpen(false);
   };
 
+  const handlePptxImport = async (file: File) => {
+    setImportingPptx(true);
+    try {
+      const result = await importPptxFile(file);
+      setSelectedTemplateId(IMPORTED_TEMPLATE_ID);
+      setDeck(result.deck);
+      setActiveSlideIndex(0);
+      setSelected(-1);
+      setSelectedPath(null);
+      setSelectedItems([]);
+      setSelectedTableCell(null);
+      setEditorOpen(false);
+      setSlideLayoutOpen(false);
+      setThemeOpen(false);
+      setPresenting(false);
+      if (result.warnings.length > 0) {
+        console.warn("PPTX import warnings:", result.warnings);
+      }
+    } catch (error) {
+      console.error("PPTX import failed:", error);
+      window.alert(
+        error instanceof Error ? error.message : "Failed to import PPTX.",
+      );
+    } finally {
+      setImportingPptx(false);
+    }
+  };
+
   return (
     <div style={layoutStyles.shell}>
       <ThumbnailRail />
@@ -152,12 +189,19 @@ function SlideEditorBody({
       <main style={layoutStyles.main}>
         <EditorTopbar
           exportingType={exportingType}
+          importingPptx={importingPptx}
           onExport={handleExport}
           onPdfExport={handlePdfExport}
+          onImportPptx={handlePptxImport}
           onOpenTheme={() => setThemeOpen(true)}
           toolbarLeading={
             <>
               <TemplateSelect
+                importedLabel={
+                  selectedTemplateId === IMPORTED_TEMPLATE_ID
+                    ? deck.title
+                    : undefined
+                }
                 value={selectedTemplateId}
                 onChange={handleTemplateChange}
               />
@@ -220,9 +264,11 @@ function SlideEditorBody({
 }
 
 function TemplateSelect({
+  importedLabel,
   value,
   onChange,
 }: {
+  importedLabel?: string;
   value: string;
   onChange: (event: ChangeEvent<HTMLSelectElement>) => void;
 }) {
@@ -234,6 +280,11 @@ function TemplateSelect({
       style={templateSelectStyle}
       title="Choose a deck template"
     >
+      {importedLabel ? (
+        <option value={IMPORTED_TEMPLATE_ID}>
+          {`Imported: ${importedLabel}`}
+        </option>
+      ) : null}
       {TEMPLATES.map((template) => (
         <option key={template.id} value={template.id}>
           {template.label}
