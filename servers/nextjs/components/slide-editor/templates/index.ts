@@ -1,9 +1,9 @@
 import type { Deck } from "../lib/slide-schema";
 import type { ComponentTemplate } from "../componentTemplates";
-import { cybersecurityBusinessDeck } from "./cybersecurity-business";
-import { ezsecurityPitchDeck } from "./ezsecurity-pitch";
 import { layoutKitDeck } from "./layout-kit";
 import { layoutsJsonDeck } from "./layouts";
+import { neoGeneralDeck } from "./neo-general";
+import { reportDeck } from "./report";
 
 export type TemplateDescriptor = {
   id: string;
@@ -29,24 +29,19 @@ export const TEMPLATES: ReadonlyArray<TemplateDescriptor> = [
     deck: layoutsJsonDeck,
   },
   {
-    id: "cybersecurity-business",
-    label: "Exec Review",
+    id: "neo-general",
+    label: "Neo General",
     description:
-      "May 2026 business review with Jira and Salesforce-derived operating data.",
-    deck: cybersecurityBusinessDeck,
+      "Legacy Neo General layouts rebuilt as editable slide-editor elements.",
+    deck: neoGeneralDeck,
   },
   {
-    id: "ezsecurity-pitch",
-    label: "Pitch Deck",
+    id: "report",
+    label: "Report",
     description:
-      "Series A pitch deck with traction, market, GTM, business model, and raise.",
-    deck: ezsecurityPitchDeck,
+      "Legacy Report layouts rebuilt as editable slide-editor elements.",
+    deck: reportDeck,
   },
 ];
 
-export {
-  cybersecurityBusinessDeck,
-  ezsecurityPitchDeck,
-  layoutKitDeck,
-  layoutsJsonDeck,
-};
+export { layoutKitDeck, layoutsJsonDeck, neoGeneralDeck, reportDeck };
