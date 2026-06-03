@@ -51,8 +51,8 @@ The flow is split across a few files:
 - `app/api/slide-editor/generate/route.ts`: validates the request, calls the
   selected model, resolves template layout metadata, and returns a deck.
 - `templates/index.ts`: lists available slide-editor templates.
-- `templates/neo-general.ts`: defines the Neo General deck and its generation
-  layout metadata.
+- `templates/neo-general.ts` and `templates/report.ts`: define editable decks
+  and template-owned generation layout metadata.
 - `slide-generation-layout-metadata.ts`: defines the model-facing layout
   metadata shape.
 - `ai-slide-generation.ts`: turns a normalized generation plan into editable
@@ -161,9 +161,10 @@ type TemplateDescriptor = {
 
 The key generation field is `generationLayouts`.
 
-For `Neo General`, this metadata lives beside the template itself in
-`templates/neo-general.ts`. Each entry connects a model-friendly `layoutId` to
-an actual slide inside the template deck:
+For generation-ready templates such as `Neo General` and `Report`, this
+metadata lives beside the template itself in files like
+`templates/neo-general.ts` and `templates/report.ts`. Each entry connects a
+model-friendly `layoutId` to an actual slide inside the template deck:
 
 ```ts
 type GenerationLayoutMetadata = {
@@ -478,6 +479,7 @@ buildAdaptiveGeneratedDeck({
   plan,
   description,
   slideCount,
+  generationLayouts,
 });
 ```
 
@@ -488,19 +490,25 @@ The builder:
 - Creates a fallback plan.
 - Normalizes the AI plan against the fallback.
 - Builds a layout catalog from the template.
+- Uses template generation metadata to preserve semantic cover and closing
+  slide choices.
 - Extracts/adapts theme colors.
 - Forces slide 1 to be a cover when appropriate.
 - Forces the final slide to be a closing slide when appropriate.
-- Builds each generated slide using editable slide-editor elements.
+- First tries to clone and fill the selected native template slide.
+- Falls back to adaptive editable slide-editor elements when native filling is
+  not possible.
 - Validates the final result with `DeckSchema.parse`.
 
-The adaptive builder does not clone the selected template slide pixel for pixel.
-Instead, it uses the selected layout's semantic purpose and the template theme to
-compose robust editable slides.
+The builder keeps generated slides coherent with the selected template by
+reusing native template slides whenever possible. It fills text, list, chart,
+table, metric, and image slots from the content-only plan while preserving the
+template's geometry, colors, typography, and decorative elements.
 
-This is why the generated output can be better than a literal template fill.
-The builder can choose card grids, timelines, metrics, charts, tables, quote
-slides, covers, and closing slides using consistent editor-native elements.
+When a native slide is not a good fit, the adaptive fallback still uses the
+selected layout's semantic purpose and the template theme to compose robust
+editable slides. This keeps local-model generation usable even when the model's
+layout choice or content shape is imperfect.
 
 ## Step 12: Sanitization Protects The Output
 
@@ -611,6 +619,8 @@ To make a template generate well, keep it self-contained:
 5. Write a practical `layoutDescription`.
 6. Set `semanticKind` accurately.
 7. Give `schemaFields` that tell the model what content matters.
+8. Export the metadata from `templates/index.ts` through the template
+   descriptor's `generationLayouts` field.
 
 Good metadata is specific:
 

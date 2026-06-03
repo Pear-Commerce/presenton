@@ -1,4 +1,10 @@
-import type { ChartElement, Deck, Slide, SlideElement } from "../lib/slide-schema";
+import type {
+  ChartElement,
+  Deck,
+  Slide,
+  SlideElement,
+} from "../lib/slide-schema";
+import type { GenerationLayoutMetadata } from "../lib/slide-generation-layout-metadata";
 import { createTemplateElements } from "./template-elements";
 
 const FONT = "Source Sans 3";
@@ -30,6 +36,140 @@ const REPORT_IMAGES = {
     "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=900&q=80",
   ],
 };
+
+export const reportGenerationLayouts = [
+  {
+    layoutId: "report-cover",
+    slideIndex: 0,
+    layoutName: "Report Cover",
+    layoutDescription:
+      "A centered report cover with two-line title, small author or owner line, subtitle, and decorative vertical accent bars.",
+    semanticKind: "cover",
+    schemaFields: ["title", "body[0]=author or owner", "body[1]=subtitle"],
+  },
+  {
+    layoutId: "report-title-description-image",
+    slideIndex: 1,
+    layoutName: "Narrative With Feature Image",
+    layoutDescription:
+      "A report introduction layout with title, concise paragraph, 3-4 supporting bullets, and a large rounded feature image on the right.",
+    semanticKind: "general",
+    schemaFields: [
+      "title",
+      "body[0]=short narrative",
+      "bullets[]",
+      "imagePrompt",
+    ],
+  },
+  {
+    layoutId: "report-metrics-narrative",
+    slideIndex: 2,
+    layoutName: "Narrative With Metric Pills",
+    layoutDescription:
+      "A report findings layout with title, narrative paragraph, supporting bullets, and two tall metric panels for key quantitative takeaways.",
+    semanticKind: "metrics",
+    schemaFields: [
+      "title",
+      "body[0]=finding summary",
+      "bullets[]",
+      "metrics[]=value,label,description",
+    ],
+  },
+  {
+    layoutId: "report-title-image-bullet-cards",
+    slideIndex: 3,
+    layoutName: "Image With Two Solution Cards",
+    layoutDescription:
+      "A solution or recommendation layout with a wide supporting image and two large numbered cards for recommended actions or options.",
+    semanticKind: "cards",
+    schemaFields: [
+      "title",
+      "bullets[]=action title: action description",
+      "imagePrompt",
+    ],
+  },
+  {
+    layoutId: "report-milestone-circles",
+    slideIndex: 4,
+    layoutName: "Milestone Circles",
+    layoutDescription:
+      "A horizontal milestone layout with five large numbered circles, each followed by a short heading and description.",
+    semanticKind: "timeline",
+    schemaFields: ["title", "bullets[]=milestone heading: milestone description"],
+  },
+  {
+    layoutId: "report-icon-bullet-grid",
+    slideIndex: 5,
+    layoutName: "Icon Bullet Grid",
+    layoutDescription:
+      "A report section layout with title and six icon-enhanced bullet blocks arranged in a two-column grid.",
+    semanticKind: "bullets",
+    schemaFields: ["title", "bullets[]=point title: point description"],
+  },
+  {
+    layoutId: "report-chart-with-bullets",
+    slideIndex: 6,
+    layoutName: "Bar Chart With Insight Bullets",
+    layoutDescription:
+      "A data analysis layout with title, three compact icon insight bullets on the left, and a large bar chart on the right.",
+    semanticKind: "chart",
+    schemaFields: ["title", "bullets[]=insight title: insight description", "chart"],
+  },
+  {
+    layoutId: "report-title-description-chart",
+    slideIndex: 7,
+    layoutName: "Narrative With Chart",
+    layoutDescription:
+      "A chart explanation layout with title, icon badge, short narrative, and a large chart area for one trend or comparison.",
+    semanticKind: "chart",
+    schemaFields: ["title", "body[0]=chart takeaway", "chart"],
+  },
+  {
+    layoutId: "report-chart-metric-cards",
+    slideIndex: 8,
+    layoutName: "Chart With Metric Cards",
+    layoutDescription:
+      "A performance layout with a chart on the left and two vertical metric panels on the right for KPI context.",
+    semanticKind: "metrics",
+    schemaFields: ["title", "chart", "metrics[]=value,label,description"],
+  },
+  {
+    layoutId: "report-performance-metric-pills",
+    slideIndex: 9,
+    layoutName: "Three Metric Pills",
+    layoutDescription:
+      "A focused KPI slide with title and three tall metric panels, each supporting one or two values with labels and descriptions.",
+    semanticKind: "metrics",
+    schemaFields: ["title", "metrics[]=value,label,description"],
+  },
+  {
+    layoutId: "report-workflow-circles",
+    slideIndex: 10,
+    layoutName: "Workflow Circles",
+    layoutDescription:
+      "A process layout with four connected service or workflow steps, circular icon badges, headings, and short descriptions.",
+    semanticKind: "timeline",
+    schemaFields: ["title", "bullets[]=step heading: step description"],
+  },
+  {
+    layoutId: "report-team-image-gallery",
+    slideIndex: 11,
+    layoutName: "Full-Bleed Team Image Gallery",
+    layoutDescription:
+      "A full-bleed visual team layout with five vertical image columns and overlaid name and role text.",
+    semanticKind: "team",
+    schemaFields: ["title", "bullets[]=Name: role", "imagePrompt"],
+  },
+  {
+    layoutId: "report-dashboard-grid",
+    slideIndex: 12,
+    layoutName: "Dashboard Grid",
+    layoutDescription:
+      "A compact report dashboard with top KPI strip and six small chart cards for multi-metric performance snapshots.",
+    semanticKind: "chart",
+    schemaFields: ["title", "metrics[]=value,label", "chart"],
+  },
+] satisfies GenerationLayoutMetadata[];
 
 const { text, rect, ellipse, line, image, svg, chart, slide } =
   createTemplateElements({

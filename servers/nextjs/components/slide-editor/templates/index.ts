@@ -4,7 +4,7 @@ import type { GenerationLayoutMetadata } from "../lib/slide-generation-layout-me
 import { layoutKitDeck } from "./layout-kit";
 import { layoutsJsonDeck } from "./layouts";
 import { neoGeneralDeck, neoGeneralGenerationLayouts } from "./neo-general";
-import { reportDeck } from "./report";
+import { reportDeck, reportGenerationLayouts } from "./report";
 
 export type TemplateDescriptor = {
   id: string;
@@ -44,6 +44,7 @@ export const TEMPLATES: ReadonlyArray<TemplateDescriptor> = [
     description:
       "Legacy Report layouts rebuilt as editable slide-editor elements.",
     deck: reportDeck,
+    generationLayouts: reportGenerationLayouts,
   },
 ];
 
@@ -53,4 +54,5 @@ export {
   neoGeneralDeck,
   neoGeneralGenerationLayouts,
   reportDeck,
+  reportGenerationLayouts,
 };

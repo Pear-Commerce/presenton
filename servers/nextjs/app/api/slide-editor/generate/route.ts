@@ -140,6 +140,7 @@ export async function POST(request: Request) {
       plan,
       description,
       slideCount,
+      generationLayouts,
     });
 
     return NextResponse.json({

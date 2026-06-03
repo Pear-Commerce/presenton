@@ -18,6 +18,7 @@ import {
   type TextElement,
   type TextListElement,
 } from "./slide-schema";
+import type { GenerationLayoutMetadata } from "./slide-generation-layout-metadata";
 
 export type SlideLayoutManifest = {
   index: number;
@@ -164,11 +165,13 @@ export function buildAdaptiveGeneratedDeck({
   plan,
   description,
   slideCount,
+  generationLayouts = [],
 }: {
   template: Deck;
   plan: GeneratedDeckPlan;
   description: string;
   slideCount: number;
+  generationLayouts?: ReadonlyArray<GenerationLayoutMetadata>;
 }): Deck {
   const fallback = fallbackGeneratedPlan(template, description, slideCount);
   const normalized = normalizePlan(plan, fallback, template.slides.length);
@@ -189,6 +192,7 @@ export function buildAdaptiveGeneratedDeck({
         deckTitle,
         index,
         slideCount,
+        generationLayouts,
       }) ??
       buildAdaptiveSlide({
         content,
@@ -257,14 +261,22 @@ function buildTemplateNativeSlide({
   deckTitle,
   index,
   slideCount,
+  generationLayouts,
 }: {
   template: Deck;
   content: GeneratedSlideContent;
   deckTitle: string;
   index: number;
   slideCount: number;
+  generationLayouts: ReadonlyArray<GenerationLayoutMetadata>;
 }): Slide | null {
-  const sourceIndex = resolveNativeTemplateSlideIndex(template, content, index, slideCount);
+  const sourceIndex = resolveNativeTemplateSlideIndex(
+    template,
+    content,
+    index,
+    slideCount,
+    generationLayouts,
+  );
   const source = template.slides[sourceIndex];
   if (!source) return null;
 
@@ -287,19 +299,67 @@ function resolveNativeTemplateSlideIndex(
   content: GeneratedSlideContent,
   index: number,
   slideCount: number,
+  generationLayouts: ReadonlyArray<GenerationLayoutMetadata>,
 ) {
-  const selectedIndex = clampInt(content.layoutIndex, 0, template.slides.length - 1);
+  const selectedIndex = clampInt(
+    content.layoutIndex,
+    0,
+    template.slides.length - 1,
+  );
+  const selectedLayout = findGenerationLayout(
+    generationLayouts,
+    content,
+    selectedIndex,
+  );
+
   if (index === 0 && slideCount > 1) {
-    return findNativeSlideIndex(template, /title description with image|headline|executive summary/i) ?? selectedIndex;
+    if (selectedLayout?.semanticKind === "cover") return selectedIndex;
+    return (
+      findNativeSlideIndexForKind(generationLayouts, "cover") ??
+      findNativeSlideIndex(
+        template,
+        /intro|cover|title description with image|headline|executive summary/i,
+      ) ??
+      selectedIndex
+    );
   }
   if (index === slideCount - 1 && slideCount > 2) {
-    return findNativeSlideIndex(template, /thank|contact|closing|footer image/i) ?? selectedIndex;
+    if (selectedLayout?.semanticKind === "closing") return selectedIndex;
+    return (
+      findNativeSlideIndexForKind(generationLayouts, "closing") ??
+      findNativeSlideIndex(template, /thank|contact|closing|footer image/i) ??
+      selectedIndex
+    );
   }
   return selectedIndex;
 }
 
+function findGenerationLayout(
+  generationLayouts: ReadonlyArray<GenerationLayoutMetadata>,
+  content: GeneratedSlideContent,
+  slideIndex: number,
+) {
+  return (
+    generationLayouts.find(
+      (layout) =>
+        content.inspiredLayoutId != null &&
+        layout.layoutId === content.inspiredLayoutId,
+    ) ?? generationLayouts.find((layout) => layout.slideIndex === slideIndex)
+  );
+}
+
+function findNativeSlideIndexForKind(
+  generationLayouts: ReadonlyArray<GenerationLayoutMetadata>,
+  kind: GenerationLayoutMetadata["semanticKind"],
+) {
+  return generationLayouts.find((layout) => layout.semanticKind === kind)
+    ?.slideIndex;
+}
+
 function findNativeSlideIndex(template: Deck, pattern: RegExp) {
-  const index = template.slides.findIndex((slide) => pattern.test(slide.title ?? ""));
+  const index = template.slides.findIndex((slide) =>
+    pattern.test(slide.title ?? ""),
+  );
   return index >= 0 ? index : undefined;
 }
 
@@ -310,9 +370,16 @@ function fillNativeTextSlots(
   index: number,
   slideCount: number,
 ) {
-  const fillableRefs = refs.filter((ref) => !isStructuralTemplateText(ref.element, ref.original));
+  const fillableRefs = refs.filter(
+    (ref) => !isStructuralTemplateText(ref.element, ref.original),
+  );
   const values = nativeTextValues(content, deckTitle, index);
-  const fallbackValues = nativeFallbackTextValues(content, deckTitle, index, slideCount);
+  const fallbackValues = nativeFallbackTextValues(
+    content,
+    deckTitle,
+    index,
+    slideCount,
+  );
   let valueIndex = 0;
 
   for (const ref of fillableRefs) {
