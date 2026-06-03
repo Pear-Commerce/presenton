@@ -4,6 +4,7 @@ import type {
   Slide,
   SlideElement,
 } from "../lib/slide-schema";
+import type { GenerationLayoutMetadata } from "../lib/slide-generation-layout-metadata";
 import { createTemplateElements } from "./template-elements";
 
 const SANS = "Poppins";
@@ -42,6 +43,270 @@ const REAL_IMAGES = {
     "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=600&q=80",
   ],
 };
+
+export const neoGeneralGenerationLayouts = [
+  {
+    layoutId: "headline-description-with-image-layout",
+    slideIndex: 16,
+    layoutName: "Title Description With Image",
+    layoutDescription:
+      "A minimal two-column layout featuring bold title, accent bar, and description on the left, with a single rounded image on the right.",
+    semanticKind: "cover",
+    schemaFields: ["title", "body[0]=short promise", "imagePrompt"],
+  },
+  {
+    layoutId: "headline-description-with-double-image-layout",
+    slideIndex: 17,
+    layoutName: "Title Description With Two Images",
+    layoutDescription:
+      "A clean layout with left-aligned bold title, accent bar, and description paragraph, paired with two overlapping rounded images on the right in a grid arrangement.",
+    semanticKind: "visual",
+    schemaFields: ["title", "body[0]=main explanation", "imagePrompt"],
+  },
+  {
+    layoutId: "quote-slide",
+    slideIndex: 23,
+    layoutName: "Centered Text On Image Overlay",
+    layoutDescription:
+      "A full-screen layout with background image, semi-transparent overlay, centered heading with accent line, large quote icon, quote text, and author attribution with decorative lines.",
+    semanticKind: "quote",
+    schemaFields: ["title", "body[0]=quote", "body[1]=author", "imagePrompt"],
+  },
+  {
+    layoutId: "left-align-quote",
+    slideIndex: 11,
+    layoutName: "Left-Aligned Text On Background Image",
+    layoutDescription:
+      "A full-bleed background image layout featuring a left-aligned bold title with accent bar, a prominent quote in large text, and author attribution below.",
+    semanticKind: "quote",
+    schemaFields: ["title", "body[0]=quote", "body[1]=author", "imagePrompt"],
+  },
+  {
+    layoutId: "title-two-column-numbered-list",
+    slideIndex: 24,
+    layoutName: "Split Title With Two Column Numbered List",
+    layoutDescription:
+      "A split layout with large title on the left and two-column numbered list on the right. Each item displays a numbered circle badge and label.",
+    semanticKind: "bullets",
+    schemaFields: ["title", "bullets[]=numbered agenda or sections"],
+  },
+  {
+    layoutId: "title-side-insight-slide",
+    slideIndex: 0,
+    layoutName: "Split Title With Text Card",
+    layoutDescription:
+      "A balanced two-section layout with bold title and accent bar on the left, paired with a white card on the right containing accent-colored heading and description text.",
+    semanticKind: "cards",
+    schemaFields: ["title", "body[0]=core insight", "bullets[]=supporting points"],
+  },
+  {
+    layoutId: "title-six-card-grid-slide-layout",
+    slideIndex: 1,
+    layoutName: "Title With Six Text Cards Grid",
+    layoutDescription:
+      "A layout featuring left-aligned bold title with accent bar, followed by a 3x2 grid of up to 6 cards. Each card contains an accent-colored heading and description text.",
+    semanticKind: "cards",
+    schemaFields: ["title", "bullets[]=Card title: card description"],
+  },
+  {
+    layoutId: "title-three-column-risk-constraints-slide-layout",
+    slideIndex: 5,
+    layoutName: "Three Column Category Cards",
+    layoutDescription:
+      "A layout with bold title and accent bar at top, followed by three column cards each featuring large category label, subtitle with accent dot, and detailed description.",
+    semanticKind: "cards",
+    schemaFields: ["title", "bullets[]=Category: description"],
+  },
+  {
+    layoutId: "title-three-columns-with-labels",
+    slideIndex: 9,
+    layoutName: "Three Columns With Index Numbers",
+    layoutDescription:
+      "A layout featuring bold title with accent bar, followed by three indexed columns each containing large index number, heading, and two labeled content sections.",
+    semanticKind: "cards",
+    schemaFields: ["title", "bullets[]=Column heading: two short details"],
+  },
+  {
+    layoutId: "title-challenge-outcome-customer-card",
+    slideIndex: 13,
+    layoutName: "Two Section Text With Highlight Card",
+    layoutDescription:
+      "A two-section layout featuring title with accent bar, first section with heading and description, numbered list in the second section on the left, and a highlight card on the right with name, subtitle, icon badge, and prominent metric.",
+    semanticKind: "cards",
+    schemaFields: ["title", "body[]=challenge/outcome copy", "bullets[]", "metrics[0]"],
+  },
+  {
+    layoutId: "bullet-icons-only-slide",
+    slideIndex: 18,
+    layoutName: "Icon Bullet Grid With Image",
+    layoutDescription:
+      "A layout featuring a large left-aligned title with a 2-4 icon bullet point grid, each with circular icon badge, title, and optional subtitle. A rounded supporting image sits on the right.",
+    semanticKind: "bullets",
+    schemaFields: ["title", "bullets[]=Point: subtitle", "imagePrompt"],
+  },
+  {
+    layoutId: "bullet-with-icons-slide",
+    slideIndex: 19,
+    layoutName: "Image With Icon Bullets",
+    layoutDescription:
+      "A two-section layout with a full-width title, left-side image with decorative grid pattern, and right-side content featuring description text and 1-3 icon-enhanced bullet points. Each bullet has an icon badge, title, accent line, and description.",
+    semanticKind: "bullets",
+    schemaFields: ["title", "body[0]=context", "bullets[]=Point: description", "imagePrompt"],
+  },
+  {
+    layoutId: "numbered-bullets-slide",
+    slideIndex: 22,
+    layoutName: "Title Image With Numbered Points",
+    layoutDescription:
+      "A layout featuring a large title with accent line, a supporting image in the upper right, and 1-3 numbered bullet points in a two-column grid below. Each point has a large number prefix, title, and description.",
+    semanticKind: "bullets",
+    schemaFields: ["title", "bullets[]=Step title: description", "imagePrompt"],
+  },
+  {
+    layoutId: "headline-text-with-stats-layout",
+    slideIndex: 15,
+    layoutName: "Numbered List With Side Metrics",
+    layoutDescription:
+      "A two-column layout with bold title, accent bar, and numbered bullet point list on the left, paired with 3 large vertical metrics on the right. Each metric shows value with label and accent dot.",
+    semanticKind: "metrics",
+    schemaFields: ["title", "bullets[]=numbered points", "metrics[]=value,label,description"],
+  },
+  {
+    layoutId: "performance-grid-snapshot-slide",
+    slideIndex: 14,
+    layoutName: "Metric Cards Grid",
+    layoutDescription:
+      "A centered layout with bold title and accent bar, followed by a 4x2 grid of up to 8 metric cards. Each card displays a value, label, and subtext. Cards can optionally be highlighted with colored background.",
+    semanticKind: "metrics",
+    schemaFields: ["title", "metrics[]=value,label,description"],
+  },
+  {
+    layoutId: "layout-text-block-with-metric-cards",
+    slideIndex: 10,
+    layoutName: "Text Block With Progress Metric Cards",
+    layoutDescription:
+      "A split layout with title, subheading, and description on the left, paired with a gray panel containing up to 5 metric cards on the right. Each card shows name, value, target comparison, and semi-circular progress indicator.",
+    semanticKind: "metrics",
+    schemaFields: ["title", "body[]=narrative text", "metrics[]=progress metric"],
+  },
+  {
+    layoutId: "metrics-with-image-slide",
+    slideIndex: 21,
+    layoutName: "Image With Title And Metrics",
+    layoutDescription:
+      "A two-column layout with a large supporting image on the left and content on the right including title, description, and a 2-column metrics grid displaying up to 3 statistics with labels and values.",
+    semanticKind: "metrics",
+    schemaFields: ["title", "body[0]=description", "metrics[]=value,label", "imagePrompt"],
+  },
+  {
+    layoutId: "title-metricValue-metricLabel-funnelStages",
+    slideIndex: 6,
+    layoutName: "Metric With Funnel Bars",
+    layoutDescription:
+      "A layout featuring title with accent bar, left-side key metric with label, and horizontal funnel visualization on the right. Each funnel stage shows labeled pill, connector line, and colored bar with value and rate.",
+    semanticKind: "metrics",
+    schemaFields: ["title", "metrics[0]=headline metric", "chart.data[]=funnel stages"],
+  },
+  {
+    layoutId: "title-metrics-with-chart",
+    slideIndex: 3,
+    layoutName: "Chart With Sidebar Metrics",
+    layoutDescription:
+      "A two-column layout featuring a bold title, a large chart container on the left, and up to 6 vertical metrics on the right sidebar. Supports line, bar, grouped, stacked, clustered, diverging, area, pie, and donut charts.",
+    semanticKind: "chart",
+    schemaFields: ["title", "body[0]=context", "chart", "metrics[]=value,label"],
+  },
+  {
+    layoutId: "title-with-full-width-chart",
+    slideIndex: 2,
+    layoutName: "Title With Full-Width Chart",
+    layoutDescription:
+      "A centered layout with a bold title and underline accent, followed by a full-width chart container with legend. Supports line, bar, grouped, stacked, clustered, diverging, area, pie, and donut charts.",
+    semanticKind: "chart",
+    schemaFields: ["title", "chart"],
+  },
+  {
+    layoutId: "chart-with-bullets-slide",
+    slideIndex: 20,
+    layoutName: "Chart With Bullet Cards",
+    layoutDescription:
+      "A split layout with title, description, and a versatile chart on the left, paired with 1-3 colored icon bullet cards on the right. Supports bar, grouped, stacked, clustered, diverging, line, area, pie, and scatter charts.",
+    semanticKind: "chart",
+    schemaFields: ["title", "body[0]=chart takeaway", "chart", "bullets[]=insight cards"],
+  },
+  {
+    layoutId: "multi-chart-grid-slide",
+    slideIndex: 26,
+    layoutName: "Title Description With Multi-Chart Grid",
+    layoutDescription:
+      "A flexible dashboard layout featuring a title section with description and 1-6 auto-arranged charts in a responsive grid. Supports bar, line, area, pie, donut, and scatter charts.",
+    semanticKind: "chart",
+    schemaFields: ["title", "body[0]=dashboard context", "chart"],
+  },
+  {
+    layoutId: "title-description-multi-chart-grid-bullets",
+    slideIndex: 28,
+    layoutName: "Title Description With Multi-Chart Grid + Bullets",
+    layoutDescription:
+      "A dashboard layout featuring a title and description, up to 4 bullet points, and 1-4 auto-arranged charts in a responsive grid. Supports bar, line, area, pie, donut, and scatter charts.",
+    semanticKind: "chart",
+    schemaFields: ["title", "body[0]=dashboard context", "chart", "bullets[]"],
+  },
+  {
+    layoutId: "title-description-multi-chart-grid-metrics",
+    slideIndex: 27,
+    layoutName: "Title Description With Multi-Chart Grid + Metrics",
+    layoutDescription:
+      "A dashboard layout featuring a title and description, up to 4 KPI metrics, and 1-6 auto-arranged charts in a responsive grid. Ideal for analytics overviews, KPI summaries, and performance dashboards.",
+    semanticKind: "chart",
+    schemaFields: ["title", "body[0]=dashboard context", "chart", "metrics[]"],
+  },
+  {
+    layoutId: "title-description-three-columns-table",
+    slideIndex: 12,
+    layoutName: "Title Description With Three Column Table",
+    layoutDescription:
+      "A layout featuring split title and description at the top, followed by a three-column table with colored headers and vertical bullet point sections below each.",
+    semanticKind: "table",
+    schemaFields: ["title", "body[0]=summary", "table.columns", "table.rows"],
+  },
+  {
+    layoutId: "timeline-alternating-cards-slide",
+    slideIndex: 8,
+    layoutName: "Horizontal Timeline With Cards",
+    layoutDescription:
+      "A visual timeline layout featuring centered title, horizontal dashed axis line, and 2-6 milestone cards alternating above and below the axis. Each card shows a date label and description with colored accent dots.",
+    semanticKind: "timeline",
+    schemaFields: ["title", "table.columns=[Year,Milestone,Impact]", "table.rows", "bullets[]"],
+  },
+  {
+    layoutId: "team-slide",
+    slideIndex: 25,
+    layoutName: "Description With Photo Cards Grid",
+    layoutDescription:
+      "A two-section layout with title, accent line, and description on the left, paired with a 2x2 or flexible grid of 2-4 person cards on the right. Each card displays photo, name, position, and bio.",
+    semanticKind: "team",
+    schemaFields: ["title", "body[0]=team context", "bullets[]=Name: role and bio", "imagePrompt"],
+  },
+  {
+    layoutId: "title-description-team-grid",
+    slideIndex: 4,
+    layoutName: "Title Description With Photo Row",
+    layoutDescription:
+      "A top-aligned layout featuring split title and description sections at the top, followed by a horizontal row of up to 4 person cards. Each card shows name, designation, square photo, and brief bio.",
+    semanticKind: "team",
+    schemaFields: ["title", "body[0]=team context", "bullets[]=Name: role and bio", "imagePrompt"],
+  },
+  {
+    layoutId: "thank-you-contact-info-footer-image-slide-layout",
+    slideIndex: 7,
+    layoutName: "Centered Title With Contact And Footer Image",
+    layoutDescription:
+      "A conclusion slide featuring centered title with accent bar, description text on the left, contact information aligned right, and a full-width footer image.",
+    semanticKind: "closing",
+    schemaFields: ["title", "body[]=closing message and contact details", "imagePrompt"],
+  },
+] satisfies GenerationLayoutMetadata[];
 
 const { text, rect, ellipse, line, svg, image, chart, table, slide } =
   createTemplateElements({

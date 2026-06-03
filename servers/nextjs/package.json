@@ -10,6 +10,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.67",
     "@babel/parser": "^7.28.4",
     "@babel/standalone": "^7.28.2",
     "@babel/traverse": "^7.29.0",
@@ -45,6 +46,7 @@
     "@tiptap/extension-underline": "^2.0.0",
     "@tiptap/react": "^2.11.5",
     "@tiptap/starter-kit": "^2.11.5",
+    "ai": "^6.0.194",
     "canvas-confetti": "^1.9.4",
     "chart.js": "^4.5.1",
     "class-variance-authority": "^0.7.0",

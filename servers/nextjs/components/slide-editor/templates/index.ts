@@ -1,8 +1,9 @@
 import type { Deck } from "../lib/slide-schema";
 import type { ComponentTemplate } from "../componentTemplates";
+import type { GenerationLayoutMetadata } from "../lib/slide-generation-layout-metadata";
 import { layoutKitDeck } from "./layout-kit";
 import { layoutsJsonDeck } from "./layouts";
-import { neoGeneralDeck } from "./neo-general";
+import { neoGeneralDeck, neoGeneralGenerationLayouts } from "./neo-general";
 import { reportDeck } from "./report";
 
 export type TemplateDescriptor = {
@@ -11,6 +12,7 @@ export type TemplateDescriptor = {
   description: string;
   deck: Deck;
   componentTemplates?: ReadonlyArray<ComponentTemplate>;
+  generationLayouts?: ReadonlyArray<GenerationLayoutMetadata>;
 };
 
 export const TEMPLATES: ReadonlyArray<TemplateDescriptor> = [
@@ -34,6 +36,7 @@ export const TEMPLATES: ReadonlyArray<TemplateDescriptor> = [
     description:
       "Legacy Neo General layouts rebuilt as editable slide-editor elements.",
     deck: neoGeneralDeck,
+    generationLayouts: neoGeneralGenerationLayouts,
   },
   {
     id: "report",
@@ -44,4 +47,10 @@ export const TEMPLATES: ReadonlyArray<TemplateDescriptor> = [
   },
 ];
 
-export { layoutKitDeck, layoutsJsonDeck, neoGeneralDeck, reportDeck };
+export {
+  layoutKitDeck,
+  layoutsJsonDeck,
+  neoGeneralDeck,
+  neoGeneralGenerationLayouts,
+  reportDeck,
+};

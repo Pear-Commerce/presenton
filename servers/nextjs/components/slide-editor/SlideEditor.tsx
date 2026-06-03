@@ -3,6 +3,7 @@
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { Provider, useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useHydrateAtoms } from "jotai/utils";
+import { Sparkles } from "lucide-react";
 import {
   useMemo,
   useState,
@@ -18,6 +19,10 @@ import {
   type ComponentTemplate,
   type SlideTemplate,
 } from "./componentTemplates";
+import {
+  GenerateSlidesModal,
+  type SlideGenerationInput,
+} from "./generation/GenerateSlidesModal";
 import {
   DeckThemeDrawer,
   SlideEditorDrawer,
@@ -114,6 +119,8 @@ function SlideEditorBody({
   const [themeOpen, setThemeOpen] = useState(false);
   const [slideLayoutOpen, setSlideLayoutOpen] = useState(false);
   const [importingPptx, setImportingPptx] = useState(false);
+  const [generationOpen, setGenerationOpen] = useState(false);
+  const [generatingSlides, setGeneratingSlides] = useState(false);
   const insertSlide = useSetAtom(insertSlideAtom);
   const { stageWidth, stageWrapRef } = useStageSize();
   const { exportStageRefs, exportingType, handleExport, handlePdfExport } =
@@ -136,15 +143,14 @@ function SlideEditorBody({
   );
   const resolvedComponentTemplates =
     componentTemplates ?? selectedTemplate?.componentTemplates ?? [];
+  const generationTemplateId =
+    selectedTemplateId === IMPORTED_TEMPLATE_ID
+      ? TEMPLATES[0].id
+      : selectedTemplateId;
 
-  const handleTemplateChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    if (event.target.value === IMPORTED_TEMPLATE_ID) return;
-    const nextTemplate = TEMPLATES.find(
-      (template) => template.id === event.target.value,
-    );
-    if (!nextTemplate) return;
-    setSelectedTemplateId(nextTemplate.id);
-    setDeck(structuredClone(nextTemplate.deck));
+  const resetEditorState = (nextTemplateId: string, nextDeck: Deck) => {
+    setSelectedTemplateId(nextTemplateId);
+    setDeck(nextDeck);
     setActiveSlideIndex(0);
     setSelected(-1);
     setSelectedPath(null);
@@ -152,23 +158,24 @@ function SlideEditorBody({
     setSelectedTableCell(null);
     setEditorOpen(false);
     setSlideLayoutOpen(false);
+    setThemeOpen(false);
+    setPresenting(false);
+  };
+
+  const handleTemplateChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    if (event.target.value === IMPORTED_TEMPLATE_ID) return;
+    const nextTemplate = TEMPLATES.find(
+      (template) => template.id === event.target.value,
+    );
+    if (!nextTemplate) return;
+    resetEditorState(nextTemplate.id, structuredClone(nextTemplate.deck));
   };
 
   const handlePptxImport = async (file: File) => {
     setImportingPptx(true);
     try {
       const result = await importPptxFile(file);
-      setSelectedTemplateId(IMPORTED_TEMPLATE_ID);
-      setDeck(result.deck);
-      setActiveSlideIndex(0);
-      setSelected(-1);
-      setSelectedPath(null);
-      setSelectedItems([]);
-      setSelectedTableCell(null);
-      setEditorOpen(false);
-      setSlideLayoutOpen(false);
-      setThemeOpen(false);
-      setPresenting(false);
+      resetEditorState(IMPORTED_TEMPLATE_ID, result.deck);
       if (result.warnings.length > 0) {
         console.warn("PPTX import warnings:", result.warnings);
       }
@@ -179,6 +186,33 @@ function SlideEditorBody({
       );
     } finally {
       setImportingPptx(false);
+    }
+  };
+
+  const handleGenerateSlides = async (input: SlideGenerationInput) => {
+    setGeneratingSlides(true);
+    try {
+      const response = await fetch("/api/slide-editor/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Failed to generate slides.");
+      }
+      resetEditorState(payload.templateId, payload.deck);
+      setGenerationOpen(false);
+      if (payload.warnings?.length) {
+        console.warn("Slide generation warnings:", payload.warnings);
+      }
+    } catch (error) {
+      console.error("Slide generation failed:", error);
+      window.alert(
+        error instanceof Error ? error.message : "Failed to generate slides.",
+      );
+    } finally {
+      setGeneratingSlides(false);
     }
   };
 
@@ -205,6 +239,15 @@ function SlideEditorBody({
                 value={selectedTemplateId}
                 onChange={handleTemplateChange}
               />
+              <button
+                type="button"
+                onClick={() => setGenerationOpen(true)}
+                style={styles.toolbarPrimaryButton}
+                title="Generate slides"
+              >
+                <Sparkles size={15} aria-hidden="true" />
+                Generate
+              </button>
               {toolbarLeading}
             </>
           }
@@ -245,6 +288,20 @@ function SlideEditorBody({
 
       {themeOpen ? (
         <DeckThemeDrawer onClose={() => setThemeOpen(false)} />
+      ) : null}
+
+      {generationOpen ? (
+        <GenerateSlidesModal
+          initialTemplateId={generationTemplateId}
+          generating={generatingSlides}
+          templates={TEMPLATES.map((template) => ({
+            id: template.id,
+            label: template.label,
+            description: template.description,
+          }))}
+          onClose={() => setGenerationOpen(false)}
+          onGenerate={handleGenerateSlides}
+        />
       ) : null}
 
       {presenting ? (
