@@ -180,16 +180,26 @@ export function buildAdaptiveGeneratedDeck({
     kind: forcedKindForPosition(content.kind, index, slideCount),
     title: index === 0 && slideCount > 1 ? deckTitle : content.title,
   }));
-  const slides = slideContents.map((content, index) =>
-    buildAdaptiveSlide({
-      content,
-      deckTitle,
-      index,
-      slideCount,
-      layout: catalog[clampInt(content.layoutIndex, 0, catalog.length - 1)],
-      theme,
-    }),
-  );
+  const slides = slideContents.map((content, index) => {
+    const layout = catalog[clampInt(content.layoutIndex, 0, catalog.length - 1)];
+    return (
+      buildTemplateNativeSlide({
+        template,
+        content,
+        deckTitle,
+        index,
+        slideCount,
+      }) ??
+      buildAdaptiveSlide({
+        content,
+        deckTitle,
+        index,
+        slideCount,
+        layout,
+        theme,
+      })
+    );
+  });
 
   return DeckSchema.parse({
     ...clone(template),
@@ -239,6 +249,541 @@ function forcedKindForPosition(
   if (slideCount > 1 && index === 0) return "cover";
   if (slideCount > 2 && index === slideCount - 1) return "closing";
   return kind;
+}
+
+function buildTemplateNativeSlide({
+  template,
+  content,
+  deckTitle,
+  index,
+  slideCount,
+}: {
+  template: Deck;
+  content: GeneratedSlideContent;
+  deckTitle: string;
+  index: number;
+  slideCount: number;
+}): Slide | null {
+  const sourceIndex = resolveNativeTemplateSlideIndex(template, content, index, slideCount);
+  const source = template.slides[sourceIndex];
+  if (!source) return null;
+
+  const slide = clone(source);
+  const title = slideTitle(content, index);
+  slide.title = truncateText(title || deckTitle, 60);
+
+  const refs = collectSlideRefs(slide);
+  fillNativeTextSlots(refs.text, content, deckTitle, index, slideCount);
+  fillNativeLists(refs.lists, content);
+  fillNativeCharts(refs.charts, content, title);
+  fillNativeTables(refs.tables, content, title);
+  fillNativeImages(refs.images, content, title);
+
+  return slide;
+}
+
+function resolveNativeTemplateSlideIndex(
+  template: Deck,
+  content: GeneratedSlideContent,
+  index: number,
+  slideCount: number,
+) {
+  const selectedIndex = clampInt(content.layoutIndex, 0, template.slides.length - 1);
+  if (index === 0 && slideCount > 1) {
+    return findNativeSlideIndex(template, /title description with image|headline|executive summary/i) ?? selectedIndex;
+  }
+  if (index === slideCount - 1 && slideCount > 2) {
+    return findNativeSlideIndex(template, /thank|contact|closing|footer image/i) ?? selectedIndex;
+  }
+  return selectedIndex;
+}
+
+function findNativeSlideIndex(template: Deck, pattern: RegExp) {
+  const index = template.slides.findIndex((slide) => pattern.test(slide.title ?? ""));
+  return index >= 0 ? index : undefined;
+}
+
+function fillNativeTextSlots(
+  refs: TextRef[],
+  content: GeneratedSlideContent,
+  deckTitle: string,
+  index: number,
+  slideCount: number,
+) {
+  const fillableRefs = refs.filter((ref) => !isStructuralTemplateText(ref.element, ref.original));
+  const values = nativeTextValues(content, deckTitle, index);
+  const fallbackValues = nativeFallbackTextValues(content, deckTitle, index, slideCount);
+  let valueIndex = 0;
+
+  for (const ref of fillableRefs) {
+    const raw = values[valueIndex] ?? fallbackValues[valueIndex % fallbackValues.length];
+    valueIndex += 1;
+    fitAndSetTextElement(ref.element, raw);
+  }
+}
+
+function nativeTextValues(
+  content: GeneratedSlideContent,
+  deckTitle: string,
+  index: number,
+) {
+  const title = slideTitle(content, index) || deckTitle;
+  const layoutId = inspiredLayoutId(content);
+  const cards = createCardItems(content);
+  const metrics = metricItems(content);
+  const summary = content.body?.[0] ?? cards[0]?.body ?? title;
+
+  if (looksLikeQuoteLayout(content)) {
+    return compactTextValues([title, quoteText(content), content.body?.[1] ?? cards[0]?.title]);
+  }
+
+  if (looksLikeTeamLayout(content)) {
+    return compactTextValues([
+      title,
+      summary,
+      ...cards.slice(0, 4).flatMap((member) => {
+        const { role, bio } = splitRoleBio(member.body);
+        return [member.title, role, bio];
+      }),
+    ]);
+  }
+
+  if (/timeline|roadmap|milestone/.test(layoutId)) {
+    return compactTextValues([
+      title,
+      ...timelineItems(content)
+        .slice(0, 6)
+        .flatMap((item) => [item.marker, item.title, item.description]),
+    ]);
+  }
+
+  if (looksLikeFunnelLayout(content)) {
+    const stages = funnelStages(content, metrics).slice(0, 4);
+    const hero = metrics[0] ?? fallbackMetrics(index)[0];
+    return compactTextValues([
+      title,
+      hero.value,
+      hero.label,
+      ...stages.flatMap((stage, stageIndex) => [
+        stage.label,
+        formatNumericLabel(stage.value),
+        conversionLabel(stages, stageIndex),
+      ]),
+    ]);
+  }
+
+  if (/metric|stats|kpi|snapshot|performance/.test(layoutId)) {
+    return compactTextValues([
+      title,
+      summary,
+      content.body?.[1],
+      ...metrics.flatMap((metric) => [
+        metric.value,
+        metric.label,
+        metric.description,
+        metric.label,
+        metric.value,
+      ]),
+      ...cards.flatMap((item) => [item.title, item.body]),
+    ]);
+  }
+
+  if (/chart|dashboard|multi-chart/.test(layoutId)) {
+    return compactTextValues([
+      title,
+      summary,
+      ...metrics.flatMap((metric) => [metric.value, metric.label]),
+      ...cards.flatMap((item) => [item.title, item.body]),
+    ]);
+  }
+
+  if (/table/.test(layoutId)) {
+    return compactTextValues([
+      title,
+      summary,
+      ...cards.flatMap((item) => [item.title, item.body]),
+    ]);
+  }
+
+  if (/thank|contact|closing/.test(layoutId)) {
+    return compactTextValues([
+      title,
+      content.body?.[0] ?? summary,
+      content.body?.[1] ?? content.bullets?.[0],
+      content.body?.[2] ?? content.bullets?.[1],
+    ]);
+  }
+
+  return compactTextValues([
+    title,
+    summary,
+    ...cards.flatMap((item) => [item.title, item.body]),
+    ...metrics.flatMap((metric) => [metric.value, metric.label, metric.description]),
+  ]);
+}
+
+function nativeFallbackTextValues(
+  content: GeneratedSlideContent,
+  deckTitle: string,
+  index: number,
+  slideCount: number,
+) {
+  return compactTextValues([
+    slideTitle(content, index),
+    deckTitle,
+    ...(content.body ?? []),
+    ...(content.bullets ?? []),
+    ...createCardItems(content).flatMap((item) => [item.title, item.body]),
+    ...metricItems(content).flatMap((metric) => [
+      metric.value,
+      metric.label,
+      metric.description,
+    ]),
+    sectionTitle(index, slideCount),
+  ]);
+}
+
+function fillNativeLists(lists: TextListElement[], content: GeneratedSlideContent) {
+  const items = [
+    ...(content.bullets ?? []),
+    ...createCardItems(content).map((item) => `${item.title}: ${item.body}`),
+  ].filter((value) => !isScaffoldText(value));
+
+  for (const list of lists) {
+    const maxItems = list.maxItems ?? list.items.length;
+    const nextItems = (items.length ? items : list.items.map((item) => item.text))
+      .slice(0, Math.max(1, maxItems))
+      .map((value) => ({
+        type: "text" as const,
+        text: truncateText(value, list.maxItemLength ?? 90),
+      }));
+    list.items = nextItems;
+  }
+}
+
+function fillNativeCharts(
+  charts: ChartElement[],
+  content: GeneratedSlideContent,
+  title: string,
+) {
+  if (charts.length === 0) return;
+  const chartContent = content.chart ?? chartFromMetrics(content, title);
+  charts.forEach((chartElement, chartIndex) => {
+    const data = rotateChartData(chartContent.data, chartIndex).map((datum, datumIndex) => ({
+      label: truncateText(datum.label || `Item ${datumIndex + 1}`, 32),
+      value: Math.round(Number(datum.value) || 0),
+      color: chartElement.data[datumIndex]?.color,
+    }));
+    chartElement.title = truncateText(
+      chartIndex === 0 ? chartContent.title || title : `${chartContent.title || title} ${chartIndex + 1}`,
+      80,
+    );
+    chartElement.chartType = chartContent.type ?? chartElement.chartType;
+    chartElement.data = data.slice(0, 8);
+  });
+}
+
+function fillNativeTables(
+  tables: TableElement[],
+  content: GeneratedSlideContent,
+  title: string,
+) {
+  if (tables.length === 0) return;
+  const tableContent = normalizeGeneratedTable(content.table ?? tableFromCards(content, title));
+  tables.forEach((tableElement) => {
+    const columns = tableContent.columns.slice(0, tableElement.maxColumns ?? tableElement.columns.length);
+    const rows = tableContent.rows.slice(0, tableElement.maxRows ?? tableElement.rows.length);
+    tableElement.columns = columns.map((value, columnIndex) => ({
+      ...(tableElement.columns[columnIndex] ?? tableElement.columns[0]),
+      text: truncateText(value, 72),
+    }));
+    tableElement.rows = rows.map((row, rowIndex) =>
+      row.slice(0, columns.length).map((value, columnIndex) => ({
+        ...(
+          tableElement.rows[rowIndex]?.[columnIndex] ??
+          tableElement.rows[0]?.[columnIndex] ??
+          tableElement.columns[columnIndex]
+        ),
+        text: truncateText(value, 72),
+      })),
+    );
+  });
+}
+
+function fillNativeImages(
+  images: ImageElement[],
+  content: GeneratedSlideContent,
+  title: string,
+) {
+  images.forEach((imageElement, imageIndex) => {
+    imageElement.name = truncateText(
+      content.imagePrompt ?? `${title} supporting image ${imageIndex + 1}`,
+      120,
+    );
+  });
+}
+
+function setTextElementValue(element: TextElement, value: string) {
+  const firstRun = element.runs[0];
+  element.runs = [
+    {
+      text: value || " ",
+      font: firstRun?.font,
+    },
+  ];
+}
+
+function fitAndSetTextElement(element: TextElement, value: string) {
+  const clean = value.replace(/\s+/g, " ").trim() || " ";
+  const baseFont = element.font ?? {};
+  const baseSize = textElementFontSize(element);
+  const lineHeight = baseFont.lineHeight ?? element.runs[0]?.font?.lineHeight ?? 1.15;
+  const canWrap = shouldWrapTextSlot(element, clean);
+  const minSize = textSlotMinimumFontSize(element, clean);
+  const fit = findTextSlotFit({
+    element,
+    value: clean,
+    baseSize,
+    minSize,
+    lineHeight,
+    canWrap,
+  });
+
+  element.font = {
+    ...baseFont,
+    size: fit.size,
+    lineHeight,
+    wrap: fit.wrap ? "word" : "none",
+  };
+  setTextElementValue(element, fit.value);
+}
+
+function textElementFontSize(element: TextElement) {
+  return element.font?.size ?? element.runs[0]?.font?.size ?? 12;
+}
+
+function shouldWrapTextSlot(element: TextElement, value: string) {
+  const box = {
+    w: element.size?.width ?? 1,
+    h: element.size?.height ?? 0.3,
+  };
+  if (element.font?.wrap === "none" && value.length <= 18) return false;
+  if (!value.includes(" ")) return false;
+  if (box.h < 0.28) return false;
+  return box.w >= 1.1;
+}
+
+function textSlotMinimumFontSize(element: TextElement, value: string) {
+  const baseSize = textElementFontSize(element);
+  if (baseSize >= 28) return value.length > 44 ? 10 : 11;
+  if (baseSize >= 20) return value.length > 54 ? 8.5 : 9.5;
+  if (baseSize >= 14) return 7.5;
+  return 6;
+}
+
+function findTextSlotFit({
+  element,
+  value,
+  baseSize,
+  minSize,
+  lineHeight,
+  canWrap,
+}: {
+  element: TextElement;
+  value: string;
+  baseSize: number;
+  minSize: number;
+  lineHeight: number;
+  canWrap: boolean;
+}) {
+  const modes = canWrap ? [true, false] : [false];
+
+  for (const wrap of modes) {
+    for (let size = baseSize; size >= minSize; size -= 0.5) {
+      if (textFitsSlot(element, value, size, lineHeight, wrap)) {
+        return { value, size: roundFontSize(size), wrap };
+      }
+    }
+  }
+
+  const wrap = canWrap;
+  const size = roundFontSize(minSize);
+  return {
+    value: truncateText(value, textSlotMaxLength(element, size, lineHeight, wrap)),
+    size,
+    wrap,
+  };
+}
+
+function textFitsSlot(
+  element: TextElement,
+  value: string,
+  fontSize: number,
+  lineHeight: number,
+  wrap: boolean,
+) {
+  const box = {
+    w: element.size?.width ?? 1,
+    h: element.size?.height ?? 0.3,
+  };
+  const lines = estimateTextLines(value, box.w, fontSize, wrap);
+  const lineHeightInches = (fontSize / 72) * lineHeight;
+  const requiredHeight = lines * lineHeightInches;
+  const safety = fontSize >= 18 ? 0.04 : 0.025;
+  return requiredHeight <= Math.max(0.05, box.h - safety);
+}
+
+function estimateTextLines(
+  value: string,
+  widthInches: number,
+  fontSize: number,
+  wrap: boolean,
+) {
+  const maxChars = Math.max(1, Math.floor(charsPerTextLine(widthInches, fontSize)));
+  if (!wrap) return value.length <= maxChars ? 1 : Number.POSITIVE_INFINITY;
+
+  const words = value.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 1;
+
+  let lines = 1;
+  let current = 0;
+  for (const word of words) {
+    const wordLength = word.length;
+    if (wordLength > maxChars) {
+      lines += Math.max(0, Math.ceil(wordLength / maxChars) - (current > 0 ? 0 : 1));
+      current = wordLength % maxChars;
+      continue;
+    }
+    const next = current === 0 ? wordLength : current + 1 + wordLength;
+    if (next <= maxChars) {
+      current = next;
+    } else {
+      lines += 1;
+      current = wordLength;
+    }
+  }
+  return lines;
+}
+
+function charsPerTextLine(widthInches: number, fontSize: number) {
+  const averageGlyphWidth = fontSize >= 24 ? 0.5 : fontSize >= 14 ? 0.48 : 0.44;
+  return (widthInches * 72) / (fontSize * averageGlyphWidth);
+}
+
+function roundFontSize(value: number) {
+  return Math.max(6, Math.round(value * 2) / 2);
+}
+
+function textSlotMaxLength(
+  element: TextElement,
+  fontSize = textElementFontSize(element),
+  lineHeight = element.font?.lineHeight ?? 1.15,
+  wrap = element.font?.wrap !== "none",
+) {
+  const box = {
+    w: element.size?.width ?? 1,
+    h: element.size?.height ?? 0.3,
+  };
+  const lines =
+    box.h <= 0.24
+      ? 1
+      : Math.max(1, Math.floor(box.h / Math.max(0.08, (fontSize / 72) * lineHeight)));
+  const charsPerLine = wrap
+    ? charsPerTextLine(box.w, fontSize)
+    : charsPerTextLine(box.w, fontSize) * 0.95;
+  return clampInt(Math.floor(charsPerLine * lines), 8, 180);
+}
+
+function isStructuralTemplateText(element: TextElement, original: string) {
+  const clean = normalizeScaffoldText(original);
+  const raw = original.trim();
+  if (!clean) return true;
+  if (/^["'“”]$/.test(raw)) return true;
+  if (/^0[1-9]$/.test(raw)) return true;
+  if (/^\d+$/.test(raw) && Number(raw) > 0 && Number(raw) <= 12) return true;
+  if (
+    [
+      "key need",
+      "primary channel",
+      "challenge",
+      "outcome",
+      "target",
+      "contact us",
+      "revenue spend",
+    ].includes(clean)
+  ) {
+    return true;
+  }
+  return Boolean(element.fixed && raw.length <= 2);
+}
+
+function compactTextValues(values: Array<string | undefined>) {
+  const cleaned = values
+    .map((value) => value?.replace(/\s+/g, " ").trim())
+    .filter((value): value is string => Boolean(value && !isScaffoldText(value)));
+  return cleaned.length > 0 ? cleaned : ["Generated insight"];
+}
+
+function splitRoleBio(value: string) {
+  const clean = value.replace(/\s+/g, " ").trim();
+  const split = clean.match(/^([^:—–-]{2,38})\s*[:—–-]\s*(.+)$/);
+  if (split) {
+    return {
+      role: truncateText(split[1], 38),
+      bio: truncateText(split[2], 92),
+    };
+  }
+  const sentenceSplit = clean.split(/(?<=[.!?])\s+/);
+  return {
+    role: truncateText(sentenceSplit[0] || "Contributor", 38),
+    bio: truncateText(sentenceSplit.slice(1).join(" ") || clean, 92),
+  };
+}
+
+function conversionLabel(stages: Array<{ value: number }>, index: number) {
+  if (index === 0) return "Baseline";
+  const previous = Math.abs(stages[index - 1]?.value ?? 0);
+  const current = Math.abs(stages[index]?.value ?? 0);
+  if (!previous || !current) return "Conversion";
+  return `Conversion\n${Math.max(1, Math.round((current / previous) * 1000) / 10)}%`;
+}
+
+function chartFromMetrics(content: GeneratedSlideContent, title: string): GeneratedChart {
+  const metricData = metricItems(content)
+    .map((metric) => ({
+      label: metric.label,
+      value: numericMetricValue(metric.value),
+    }))
+    .filter((datum) => Number.isFinite(datum.value));
+
+  if (metricData.length > 0) {
+    return {
+      title: truncateText(content.chart?.title ?? title, 80),
+      type: "bar",
+      data: metricData,
+    };
+  }
+
+  return fallbackChart(title);
+}
+
+function rotateChartData(data: GeneratedChart["data"], offset: number) {
+  if (data.length === 0 || offset === 0) return data;
+  const normalizedOffset = offset % data.length;
+  return [...data.slice(normalizedOffset), ...data.slice(0, normalizedOffset)];
+}
+
+function tableFromCards(content: GeneratedSlideContent, title: string): GeneratedTable {
+  const cards = createCardItems(content).slice(0, 5);
+  if (cards.length === 0) return fallbackTable(title);
+  return {
+    columns: ["Area", "Detail", "Action"],
+    rows: cards.map((item, index) => [
+      item.title,
+      item.body,
+      content.bullets?.[index] ?? "Review",
+    ]),
+  };
 }
 
 function fallbackInspiredLayoutId(kind: GeneratedSlideKind | undefined) {
@@ -297,6 +842,9 @@ function buildAdaptiveSlide({
   }
   if (kind === "closing") {
     return buildClosingSlide(content, index, slideCount, theme);
+  }
+  if (kind === "bullets") {
+    return buildBulletSlide(content, index, slideCount, theme);
   }
   return buildCardsSlide(content, index, slideCount, theme);
 }
@@ -516,6 +1064,15 @@ function buildMetricsSlide(
   slideCount: number,
   theme: AdaptiveTheme,
 ): Slide {
+  if (looksLikeFunnelLayout(content)) {
+    return buildFunnelMetricSlide(content, index, slideCount, theme);
+  }
+  if (looksLikeMetricImageLayout(content)) {
+    return buildMetricImageSlide(content, index, slideCount, theme);
+  }
+  if (looksLikeMetricNarrativeLayout(content)) {
+    return buildMetricNarrativeSlide(content, index, slideCount, theme);
+  }
   if (slideVariant(content, index, slideCount) !== 0) {
     return buildMetricDashboardSlide(content, index, slideCount, theme);
   }
@@ -647,17 +1204,363 @@ function buildMetricDashboardSlide(
   ]);
 }
 
+function buildMetricNarrativeSlide(
+  content: GeneratedSlideContent,
+  index: number,
+  slideCount: number,
+  theme: AdaptiveTheme,
+): Slide {
+  const title = slideTitle(content, index);
+  const items = createCardItems(content).slice(0, 4);
+  const metrics = metricItems(content).slice(0, 4);
+  return adaptiveSlide(title, theme, [
+    ...header(title, content.body?.[0], theme, "MEASURES"),
+    {
+      type: "flex",
+      position: { x: 0.72, y: 1.58 },
+      size: { width: 8.56, height: 3.26 },
+      direction: "row",
+      gap: 0.24,
+      alignItems: "stretch",
+      justifyContent: "stretch",
+      children: [
+        containerCard({
+          w: 4.78,
+          h: 3.26,
+          fill: theme.card,
+          stroke: theme.line,
+          children: [
+            rect({ x: 0.34, y: 0.3, w: 0.74, h: 0.05, fill: theme.primary, r: 0.02 }),
+            text({
+              x: 0.34,
+              y: 0.58,
+              w: 3.64,
+              h: 0.62,
+              value: items[0]?.title ?? "What the numbers mean",
+              size: 22,
+              color: theme.ink,
+              bold: true,
+              lineHeight: 1.06,
+              maxLength: 58,
+            }),
+            text({
+              x: 0.36,
+              y: 1.34,
+              w: 3.82,
+              h: 0.68,
+              value:
+                items[0]?.body ??
+                content.body?.[0] ??
+                "Use the metric set to anchor the decision and explain the trade-off.",
+              size: 10.5,
+              color: theme.muted,
+              lineHeight: 1.22,
+              maxLength: 135,
+            }),
+            bullets({
+              x: 0.42,
+              y: 2.18,
+              w: 3.78,
+              h: 0.74,
+              items: items.slice(1).map((item) => item.title),
+              size: 8.8,
+              color: theme.muted,
+              marker: "number",
+            }),
+          ],
+        }),
+        {
+          ...containerCard({
+            w: 3.54,
+            h: 3.26,
+            fill: "111827",
+            stroke: "273449",
+            children: [
+              text({
+                x: 0.3,
+                y: 0.28,
+                w: 2.3,
+                h: 0.2,
+                value: "SIGNAL STACK",
+                size: 7.3,
+                color: theme.accent,
+                bold: true,
+                letterSpacing: 150,
+                wrap: "none",
+              }),
+              {
+                type: "grid",
+                position: { x: 0.28, y: 0.68 },
+                size: { width: 2.98, height: 2.24 },
+                columns: 1,
+                rows: Math.max(1, metrics.length),
+                gap: 0.12,
+                alignItems: "stretch",
+                justifyItems: "stretch",
+                children: metrics.map((metric, metricIndex) =>
+                  darkMetricStrip(metric, 2.98, 0.46, theme, metricIndex),
+                ),
+              } satisfies GridElement,
+            ],
+          }),
+          layout: { grow: 1, basis: 3.54 },
+        },
+      ],
+    } satisfies FlexElement,
+    footer(index, slideCount, theme),
+  ]);
+}
+
+function buildMetricImageSlide(
+  content: GeneratedSlideContent,
+  index: number,
+  slideCount: number,
+  theme: AdaptiveTheme,
+): Slide {
+  const title = slideTitle(content, index);
+  const metrics = metricItems(content).slice(0, 4);
+  return adaptiveSlide(title, theme, [
+    ...header(title, content.body?.[0], theme, "PROOF"),
+    {
+      type: "flex",
+      position: { x: 0.72, y: 1.58 },
+      size: { width: 8.56, height: 3.26 },
+      direction: "row",
+      gap: 0.26,
+      alignItems: "stretch",
+      justifyContent: "stretch",
+      children: [
+        containerCard({
+          w: 4.18,
+          h: 3.26,
+          fill: theme.soft,
+          stroke: theme.line,
+          children: [
+            svg({
+              x: 0.28,
+              y: 0.28,
+              w: 3.62,
+              h: 2.64,
+              markup: visualMotifSvg(theme, content.imagePrompt || title),
+              name: content.imagePrompt || `${title} metric visual`,
+            }),
+          ],
+        }),
+        {
+          ...containerCard({
+            w: 4.12,
+            h: 3.26,
+            fill: theme.card,
+            stroke: theme.line,
+            children: [
+              rect({ x: 0.28, y: 0.28, w: 0.7, h: 0.05, fill: theme.secondary, r: 0.02 }),
+              text({
+                x: 0.28,
+                y: 0.56,
+                w: 3.12,
+                h: 0.46,
+                value: "Measured impact",
+                size: 19,
+                color: theme.ink,
+                bold: true,
+                maxLength: 42,
+              }),
+              {
+                type: "grid",
+                position: { x: 0.28, y: 1.22 },
+                size: { width: 3.56, height: 1.72 },
+                columns: 2,
+                rows: 2,
+                gap: 0.16,
+                alignItems: "stretch",
+                justifyItems: "stretch",
+                children: metrics.map((metric, metricIndex) =>
+                  metricTile(metric, 1.7, 0.78, theme, metricIndex),
+                ),
+              } satisfies GridElement,
+            ],
+          }),
+          layout: { grow: 1, basis: 4.12 },
+        },
+      ],
+    } satisfies FlexElement,
+    footer(index, slideCount, theme),
+  ]);
+}
+
+function buildFunnelMetricSlide(
+  content: GeneratedSlideContent,
+  index: number,
+  slideCount: number,
+  theme: AdaptiveTheme,
+): Slide {
+  const title = slideTitle(content, index);
+  const metrics = metricItems(content).slice(0, 4);
+  const hero = metrics[0] ?? fallbackMetrics(index)[0];
+  const stages = funnelStages(content, metrics).slice(0, 5);
+  const maxValue = Math.max(1, ...stages.map((stage) => Math.abs(stage.value)));
+
+  return adaptiveSlide(title, theme, [
+    ...header(title, content.body?.[0], theme, "FUNNEL"),
+    {
+      type: "flex",
+      position: { x: 0.72, y: 1.58 },
+      size: { width: 8.56, height: 3.26 },
+      direction: "row",
+      gap: 0.24,
+      alignItems: "stretch",
+      justifyContent: "stretch",
+      children: [
+        containerCard({
+          w: 3.2,
+          h: 3.26,
+          fill: "111827",
+          stroke: "273449",
+          children: [
+            text({
+              x: 0.34,
+              y: 0.36,
+              w: 1.76,
+              h: 0.2,
+              value: "HEADLINE",
+              size: 7.4,
+              color: theme.accent,
+              bold: true,
+              letterSpacing: 150,
+              wrap: "none",
+            }),
+            text({
+              x: 0.32,
+              y: 0.86,
+              w: 2.32,
+              h: 0.72,
+              value: hero.value,
+              size: 38,
+              color: "FFFFFF",
+              bold: true,
+              wrap: "none",
+              maxLength: 18,
+            }),
+            text({
+              x: 0.36,
+              y: 1.72,
+              w: 2.22,
+              h: 0.32,
+              value: hero.label,
+              size: 12,
+              color: "E2E8F0",
+              bold: true,
+              maxLength: 38,
+            }),
+            text({
+              x: 0.36,
+              y: 2.2,
+              w: 2.2,
+              h: 0.48,
+              value: hero.description ?? content.body?.[0] ?? "Primary conversion signal",
+              size: 8.5,
+              color: "CBD5E1",
+              lineHeight: 1.16,
+              maxLength: 82,
+            }),
+          ],
+        }),
+        {
+          ...containerCard({
+            w: 5.12,
+            h: 3.26,
+            fill: theme.card,
+            stroke: theme.line,
+            children: [
+              text({
+                x: 0.3,
+                y: 0.26,
+                w: 2.6,
+                h: 0.26,
+                value: content.chart?.title ?? "Stage progression",
+                size: 13,
+                color: theme.ink,
+                bold: true,
+                maxLength: 46,
+              }),
+              ...stages.flatMap((stage, stageIndex) => {
+                const y = 0.72 + stageIndex * 0.46;
+                const fillWidth = 0.72 + (Math.abs(stage.value) / maxValue) * 3.1;
+                return [
+                  text({
+                    x: 0.32,
+                    y: y + 0.02,
+                    w: 1.28,
+                    h: 0.18,
+                    value: stage.label,
+                    size: 8,
+                    color: theme.muted,
+                    bold: true,
+                    maxLength: 24,
+                  }),
+                  rect({
+                    x: 1.72,
+                    y,
+                    w: 3.18,
+                    h: 0.24,
+                    fill: theme.soft,
+                    r: 0.08,
+                  }),
+                  rect({
+                    x: 1.72,
+                    y,
+                    w: Math.min(3.18, fillWidth),
+                    h: 0.24,
+                    fill: theme.accents[stageIndex % theme.accents.length],
+                    r: 0.08,
+                  }),
+                  text({
+                    x: 4.12,
+                    y: y + 0.03,
+                    w: 0.68,
+                    h: 0.18,
+                    value: formatNumericLabel(stage.value),
+                    size: 7.5,
+                    color: fillWidth > 2.1 ? "FFFFFF" : theme.ink,
+                    bold: true,
+                    align: "right",
+                    wrap: "none",
+                  }),
+                ];
+              }),
+            ],
+          }),
+          layout: { grow: 1, basis: 5.12 },
+        },
+      ],
+    } satisfies FlexElement,
+    footer(index, slideCount, theme),
+  ]);
+}
+
 function buildCardsSlide(
   content: GeneratedSlideContent,
   index: number,
   slideCount: number,
   theme: AdaptiveTheme,
 ): Slide {
+  if (looksLikeTeamLayout(content)) {
+    return buildTeamSlide(content, index, slideCount, theme);
+  }
+  if (looksLikeBulletLayout(content)) {
+    return buildBulletSlide(content, index, slideCount, theme);
+  }
   if (looksLikeQuoteLayout(content)) {
     return buildQuoteSlide(content, index, slideCount, theme);
   }
   if (looksLikeVisualSplit(content)) {
     return buildVisualSplitSlide(content, index, slideCount, theme);
+  }
+  if (looksLikeSpotlightLayout(content)) {
+    return buildSpotlightSlide(content, index, slideCount, theme);
+  }
+  if (looksLikeColumnCardLayout(content)) {
+    return buildColumnCardsSlide(content, index, slideCount, theme);
   }
   const variant = slideVariant(content, index, slideCount);
   if (variant === 1) {
@@ -694,6 +1597,195 @@ function buildCardGridSlide(
         insightCard(item, columns === 3 ? 2.72 : 4.18, rows === 1 ? 2.2 : 1.5, theme, itemIndex),
       ),
     } satisfies GridElement,
+    footer(index, slideCount, theme),
+  ]);
+}
+
+function buildColumnCardsSlide(
+  content: GeneratedSlideContent,
+  index: number,
+  slideCount: number,
+  theme: AdaptiveTheme,
+): Slide {
+  const title = slideTitle(content, index);
+  const items = createCardItems(content).slice(0, 3);
+  return adaptiveSlide(title, theme, [
+    ...header(title, content.body?.[0], theme, "FRAMEWORK"),
+    {
+      type: "grid",
+      position: { x: 0.72, y: 1.62 },
+      size: { width: 8.56, height: 3.22 },
+      columns: Math.max(1, items.length),
+      rows: 1,
+      gap: 0.2,
+      alignItems: "stretch",
+      justifyItems: "stretch",
+      children: items.map((item, itemIndex) =>
+        columnInsightCard(item, 2.72, 3.1, theme, itemIndex),
+      ),
+    } satisfies GridElement,
+    footer(index, slideCount, theme),
+  ]);
+}
+
+function buildBulletSlide(
+  content: GeneratedSlideContent,
+  index: number,
+  slideCount: number,
+  theme: AdaptiveTheme,
+): Slide {
+  if (looksLikeNumberedBulletLayout(content)) {
+    return buildNumberedBulletSlide(content, index, slideCount, theme);
+  }
+  return buildIconBulletSlide(content, index, slideCount, theme);
+}
+
+function buildNumberedBulletSlide(
+  content: GeneratedSlideContent,
+  index: number,
+  slideCount: number,
+  theme: AdaptiveTheme,
+): Slide {
+  const title = slideTitle(content, index);
+  const items = createCardItems(content).slice(0, 4);
+  return adaptiveSlide(title, theme, [
+    ...header(title, content.body?.[0], theme, "STEPS"),
+    {
+      type: "flex",
+      position: { x: 0.72, y: 1.58 },
+      size: { width: 8.56, height: 3.26 },
+      direction: "row",
+      gap: 0.24,
+      alignItems: "stretch",
+      justifyContent: "stretch",
+      children: [
+        containerCard({
+          w: 3.16,
+          h: 3.26,
+          fill: theme.surface,
+          stroke: theme.line,
+          children: [
+            rect({ x: 0.3, y: 0.3, w: 0.66, h: 0.05, fill: theme.accent, r: 0.02 }),
+            text({
+              x: 0.3,
+              y: 0.62,
+              w: 2.34,
+              h: 0.74,
+              value: items[0]?.title ?? "Decision path",
+              size: 23,
+              color: theme.ink,
+              bold: true,
+              lineHeight: 1.05,
+              maxLength: 52,
+            }),
+            text({
+              x: 0.32,
+              y: 1.56,
+              w: 2.26,
+              h: 0.72,
+              value:
+                items[0]?.body ??
+                content.body?.[0] ??
+                "Organize the sequence into clear actions the audience can follow.",
+              size: 9.5,
+              color: theme.muted,
+              lineHeight: 1.22,
+              maxLength: 118,
+            }),
+            rect({ x: 0.32, y: 2.64, w: 1.7, h: 0.05, fill: theme.primary, opacity: 0.22, r: 0.02 }),
+          ],
+        }),
+        {
+          ...containerCard({
+            w: 5.16,
+            h: 3.26,
+            fill: theme.card,
+            stroke: theme.line,
+            children: [
+              {
+                type: "grid",
+                position: { x: 0.24, y: 0.24 },
+                size: { width: 4.68, height: 2.78 },
+                columns: 2,
+                rows: 2,
+                gap: 0.16,
+                alignItems: "stretch",
+                justifyItems: "stretch",
+                children: items.map((item, itemIndex) =>
+                  numberedItemCard(item, 2.26, 1.31, theme, itemIndex),
+                ),
+              } satisfies GridElement,
+            ],
+          }),
+          layout: { grow: 1, basis: 5.16 },
+        },
+      ],
+    } satisfies FlexElement,
+    footer(index, slideCount, theme),
+  ]);
+}
+
+function buildIconBulletSlide(
+  content: GeneratedSlideContent,
+  index: number,
+  slideCount: number,
+  theme: AdaptiveTheme,
+): Slide {
+  const title = slideTitle(content, index);
+  const items = createCardItems(content).slice(0, 4);
+  return adaptiveSlide(title, theme, [
+    ...header(title, content.body?.[0], theme, "ACTIONS"),
+    {
+      type: "flex",
+      position: { x: 0.72, y: 1.58 },
+      size: { width: 8.56, height: 3.26 },
+      direction: "row",
+      gap: 0.28,
+      alignItems: "stretch",
+      justifyContent: "stretch",
+      children: [
+        containerCard({
+          w: 3.62,
+          h: 3.26,
+          fill: theme.soft,
+          stroke: theme.line,
+          children: [
+            svg({
+              x: 0.28,
+              y: 0.3,
+              w: 3.06,
+              h: 2.58,
+              markup: visualMotifSvg(theme, content.imagePrompt || title),
+              name: content.imagePrompt || `${title} action visual`,
+            }),
+          ],
+        }),
+        {
+          ...containerCard({
+            w: 4.66,
+            h: 3.26,
+            fill: theme.card,
+            stroke: theme.line,
+            children: [
+              {
+                type: "grid",
+                position: { x: 0.26, y: 0.28 },
+                size: { width: 4.14, height: 2.72 },
+                columns: 1,
+                rows: Math.max(1, items.length),
+                gap: 0.14,
+                alignItems: "stretch",
+                justifyItems: "stretch",
+                children: items.map((item, itemIndex) =>
+                  iconBulletCard(item, 4.14, 0.58, theme, itemIndex),
+                ),
+              } satisfies GridElement,
+            ],
+          }),
+          layout: { grow: 1, basis: 4.66 },
+        },
+      ],
+    } satisfies FlexElement,
     footer(index, slideCount, theme),
   ]);
 }
@@ -883,6 +1975,101 @@ function buildSplitNarrativeSlide(
   ]);
 }
 
+function buildTeamSlide(
+  content: GeneratedSlideContent,
+  index: number,
+  slideCount: number,
+  theme: AdaptiveTheme,
+): Slide {
+  const title = slideTitle(content, index);
+  const members = createCardItems(content).slice(0, 4);
+  return adaptiveSlide(title, theme, [
+    ...header(title, content.body?.[0], theme, "TEAM"),
+    {
+      type: "flex",
+      position: { x: 0.72, y: 1.58 },
+      size: { width: 8.56, height: 3.26 },
+      direction: "row",
+      gap: 0.24,
+      alignItems: "stretch",
+      justifyContent: "stretch",
+      children: [
+        containerCard({
+          w: 3.18,
+          h: 3.26,
+          fill: "111827",
+          stroke: "273449",
+          children: [
+            rect({ x: 0.32, y: 0.32, w: 0.72, h: 0.05, fill: theme.accent, r: 0.02 }),
+            text({
+              x: 0.32,
+              y: 0.64,
+              w: 2.34,
+              h: 0.82,
+              value: members[0]?.title ?? "Core team",
+              size: 24,
+              color: "FFFFFF",
+              bold: true,
+              lineHeight: 1.04,
+              maxLength: 54,
+            }),
+            text({
+              x: 0.34,
+              y: 1.66,
+              w: 2.24,
+              h: 0.76,
+              value:
+                content.body?.[0] ??
+                members[0]?.body ??
+                "Introduce the people or roles behind the plan.",
+              size: 9.4,
+              color: "CBD5E1",
+              lineHeight: 1.2,
+              maxLength: 118,
+            }),
+            text({
+              x: 0.34,
+              y: 2.66,
+              w: 1.64,
+              h: 0.2,
+              value: `${members.length || 1} contributors`,
+              size: 8.2,
+              color: theme.accent,
+              bold: true,
+              wrap: "none",
+            }),
+          ],
+        }),
+        {
+          ...containerCard({
+            w: 5.14,
+            h: 3.26,
+            fill: theme.card,
+            stroke: theme.line,
+            children: [
+              {
+                type: "grid",
+                position: { x: 0.24, y: 0.24 },
+                size: { width: 4.66, height: 2.78 },
+                columns: 2,
+                rows: 2,
+                gap: 0.16,
+                alignItems: "stretch",
+                justifyItems: "stretch",
+                children: members.map((member, memberIndex) =>
+                  teamMemberCard(member, 2.25, 1.31, theme, memberIndex),
+                ),
+              } satisfies GridElement,
+            ],
+          }),
+          layout: { grow: 1, basis: 5.14 },
+        },
+      ],
+    } satisfies FlexElement,
+    footer(index, slideCount, theme),
+  ]);
+}
+
 function buildQuoteSlide(
   content: GeneratedSlideContent,
   index: number,
@@ -908,7 +2095,7 @@ function buildQuoteSlide(
       markup: visualMotifSvg(theme, content.imagePrompt || title),
       name: content.imagePrompt || `${title} visual`,
     }),
-    rect({ x: 0, y: 0, w: 10, h: 5.625, fill: overlay, opacity: 74 }),
+    rect({ x: 0, y: 0, w: 10, h: 5.625, fill: overlay, opacity: 0.74 }),
     rect({ x: 0.66, y: 1.18, w: 0.84, h: 0.06, fill: theme.accent, r: 0.02 }),
     text({
       x: 0.66,
@@ -1052,6 +2239,12 @@ function buildChartSlide(
   slideCount: number,
   theme: AdaptiveTheme,
 ): Slide {
+  if (looksLikeFullWidthChartLayout(content)) {
+    return buildFullWidthChartSlide(content, index, slideCount, theme);
+  }
+  if (looksLikeMultiChartLayout(content)) {
+    return buildChartDashboardSlide(content, index, slideCount, theme);
+  }
   const title = slideTitle(content, index);
   const chartContent = content.chart ?? fallbackChart(title);
   const insights = createCardItems(content).slice(0, 3);
@@ -1131,6 +2324,162 @@ function buildChartSlide(
             ],
           }),
           layout: { grow: 1, basis: 2.98 },
+        },
+      ],
+    } satisfies FlexElement,
+    footer(index, slideCount, theme),
+  ]);
+}
+
+function buildFullWidthChartSlide(
+  content: GeneratedSlideContent,
+  index: number,
+  slideCount: number,
+  theme: AdaptiveTheme,
+): Slide {
+  const title = slideTitle(content, index);
+  const chartContent = content.chart ?? fallbackChart(title);
+  const insights = createCardItems(content).slice(0, 3);
+  return adaptiveSlide(title, theme, [
+    ...header(title, content.body?.[0], theme, "TREND"),
+    {
+      ...containerCard({
+        w: 8.56,
+        h: 2.72,
+        fill: theme.card,
+        stroke: theme.line,
+        children: [
+          chart({
+            x: 0.22,
+            y: 0.18,
+            w: 8.08,
+            h: 2.28,
+            title: chartContent.title || title,
+            type: chartContent.type ?? "bar",
+            color: theme.primary,
+            data: chartContent.data,
+            theme,
+          }),
+        ],
+      }),
+      position: { x: 0.72, y: 1.58 },
+    },
+    {
+      type: "grid",
+      position: { x: 0.72, y: 4.42 },
+      size: { width: 8.56, height: 0.48 },
+      columns: Math.max(1, insights.length),
+      rows: 1,
+      gap: 0.16,
+      alignItems: "stretch",
+      justifyItems: "stretch",
+      children: insights.map((item, itemIndex) =>
+        compactCard(item, 2.76, 0.48, theme, itemIndex),
+      ),
+    } satisfies GridElement,
+    footer(index, slideCount, theme),
+  ]);
+}
+
+function buildChartDashboardSlide(
+  content: GeneratedSlideContent,
+  index: number,
+  slideCount: number,
+  theme: AdaptiveTheme,
+): Slide {
+  const title = slideTitle(content, index);
+  const chartContent = content.chart ?? fallbackChart(title);
+  const metrics = metricItems(content).slice(0, 4);
+  const insights = createCardItems(content).slice(0, 2);
+  return adaptiveSlide(title, theme, [
+    ...header(title, content.body?.[0], theme, "DASHBOARD"),
+    {
+      type: "flex",
+      position: { x: 0.72, y: 1.58 },
+      size: { width: 8.56, height: 3.28 },
+      direction: "row",
+      gap: 0.2,
+      alignItems: "stretch",
+      justifyContent: "stretch",
+      children: [
+        containerCard({
+          w: 5.2,
+          h: 3.28,
+          fill: theme.card,
+          stroke: theme.line,
+          children: [
+            text({
+              x: 0.28,
+              y: 0.24,
+              w: 3.52,
+              h: 0.24,
+              value: chartContent.title || title,
+              size: 12.5,
+              color: theme.ink,
+              bold: true,
+              maxLength: 54,
+            }),
+            chart({
+              x: 0.18,
+              y: 0.62,
+              w: 4.82,
+              h: 1.8,
+              title: chartContent.title || title,
+              type: chartContent.type ?? "bar",
+              color: theme.primary,
+              data: chartContent.data,
+              theme,
+            }),
+            {
+              type: "grid",
+              position: { x: 0.24, y: 2.58 },
+              size: { width: 4.62, height: 0.44 },
+              columns: Math.max(1, insights.length),
+              rows: 1,
+              gap: 0.12,
+              alignItems: "stretch",
+              justifyItems: "stretch",
+              children: insights.map((item, itemIndex) =>
+                compactCard(item, 2.22, 0.44, theme, itemIndex),
+              ),
+            } satisfies GridElement,
+          ],
+        }),
+        {
+          ...containerCard({
+            w: 3.12,
+            h: 3.28,
+            fill: "111827",
+            stroke: "273449",
+            children: [
+              text({
+                x: 0.26,
+                y: 0.26,
+                w: 1.66,
+                h: 0.2,
+                value: "KPIS",
+                size: 7.5,
+                color: theme.accent,
+                bold: true,
+                letterSpacing: 150,
+                wrap: "none",
+              }),
+              {
+                type: "grid",
+                position: { x: 0.24, y: 0.66 },
+                size: { width: 2.64, height: 2.28 },
+                columns: 1,
+                rows: Math.max(1, metrics.length),
+                gap: 0.12,
+                alignItems: "stretch",
+                justifyItems: "stretch",
+                children: metrics.map((metric, metricIndex) =>
+                  darkMetricStrip(metric, 2.64, 0.48, theme, metricIndex),
+                ),
+              } satisfies GridElement,
+            ],
+          }),
+          layout: { grow: 1, basis: 3.12 },
         },
       ],
     } satisfies FlexElement,
@@ -1632,6 +2981,49 @@ function metricCard(
   });
 }
 
+function metricTile(
+  metric: GeneratedMetric,
+  w: number,
+  h: number,
+  theme: AdaptiveTheme,
+  index: number,
+): ContainerElement {
+  const accent = theme.accents[index % theme.accents.length];
+  return containerCard({
+    w,
+    h,
+    fill: theme.surface,
+    stroke: theme.line,
+    r: 0.08,
+    children: [
+      rect({ x: 0.16, y: 0.14, w: 0.38, h: 0.04, fill: accent, r: 0.02 }),
+      text({
+        x: 0.16,
+        y: 0.28,
+        w: w - 0.32,
+        h: 0.24,
+        value: metric.value,
+        size: 15.5,
+        color: theme.ink,
+        bold: true,
+        wrap: "none",
+        maxLength: 14,
+      }),
+      text({
+        x: 0.18,
+        y: 0.56,
+        w: w - 0.36,
+        h: Math.max(0.1, h - 0.62),
+        value: metric.label,
+        size: 6.8,
+        color: theme.muted,
+        bold: true,
+        maxLength: 28,
+      }),
+    ],
+  });
+}
+
 function metricMiniBlock(
   metric: GeneratedMetric,
   x: number,
@@ -1671,6 +3063,282 @@ function metricMiniBlock(
       maxLength: 28,
     }),
   ];
+}
+
+function darkMetricStrip(
+  metric: GeneratedMetric,
+  w: number,
+  h: number,
+  theme: AdaptiveTheme,
+  index: number,
+): ContainerElement {
+  return containerCard({
+    w,
+    h,
+    fill: "1F2937",
+    stroke: "334155",
+    r: 0.08,
+    children: [
+      text({
+        x: 0.16,
+        y: 0.1,
+        w: 0.78,
+        h: 0.18,
+        value: metric.value,
+        size: 12.5,
+        color: theme.accents[index % theme.accents.length],
+        bold: true,
+        wrap: "none",
+        maxLength: 12,
+      }),
+      text({
+        x: 0.98,
+        y: 0.09,
+        w: w - 1.16,
+        h: 0.18,
+        value: metric.label,
+        size: 8.2,
+        color: "F8FAFC",
+        bold: true,
+        maxLength: 30,
+      }),
+      text({
+        x: 0.98,
+        y: 0.29,
+        w: w - 1.16,
+        h: Math.max(0.1, h - 0.34),
+        value: metric.description ?? "Measured signal",
+        size: 6.5,
+        color: "CBD5E1",
+        lineHeight: 1.12,
+        maxLength: 48,
+      }),
+    ],
+  });
+}
+
+function columnInsightCard(
+  item: CardItem,
+  w: number,
+  h: number,
+  theme: AdaptiveTheme,
+  index: number,
+): ContainerElement {
+  const accent = theme.accents[index % theme.accents.length];
+  const onDark = index === 0;
+  return containerCard({
+    w,
+    h,
+    fill: onDark ? "111827" : theme.card,
+    stroke: onDark ? "273449" : theme.line,
+    children: [
+      text({
+        x: 0.24,
+        y: 0.24,
+        w: 0.62,
+        h: 0.34,
+        value: String(index + 1).padStart(2, "0"),
+        size: 18,
+        color: accent,
+        bold: true,
+        wrap: "none",
+      }),
+      rect({ x: 0.26, y: 0.78, w: 0.66, h: 0.05, fill: accent, r: 0.02 }),
+      text({
+        x: 0.24,
+        y: 1.02,
+        w: w - 0.48,
+        h: 0.66,
+        value: item.title,
+        size: 18,
+        color: onDark ? "FFFFFF" : theme.ink,
+        bold: true,
+        lineHeight: 1.06,
+        maxLength: 48,
+      }),
+      text({
+        x: 0.26,
+        y: 1.9,
+        w: w - 0.52,
+        h: 0.68,
+        value: item.body,
+        size: 8.8,
+        color: onDark ? "CBD5E1" : theme.muted,
+        lineHeight: 1.2,
+        maxLength: 100,
+      }),
+    ],
+  });
+}
+
+function numberedItemCard(
+  item: CardItem,
+  w: number,
+  h: number,
+  theme: AdaptiveTheme,
+  index: number,
+): ContainerElement {
+  const accent = theme.accents[index % theme.accents.length];
+  return containerCard({
+    w,
+    h,
+    fill: theme.surface,
+    stroke: theme.line,
+    r: 0.08,
+    children: [
+      ellipse({ x: 0.18, y: 0.18, w: 0.34, h: 0.34, fill: accent }),
+      text({
+        x: 0.18,
+        y: 0.26,
+        w: 0.34,
+        h: 0.12,
+        value: String(index + 1),
+        size: 7.2,
+        color: "FFFFFF",
+        bold: true,
+        align: "center",
+        wrap: "none",
+      }),
+      text({
+        x: 0.64,
+        y: 0.18,
+        w: w - 0.84,
+        h: 0.34,
+        value: item.title,
+        size: 11,
+        color: theme.ink,
+        bold: true,
+        lineHeight: 1.08,
+        maxLength: 38,
+      }),
+      text({
+        x: 0.22,
+        y: 0.7,
+        w: w - 0.44,
+        h: Math.max(0.2, h - 0.82),
+        value: item.body,
+        size: 7.6,
+        color: theme.muted,
+        lineHeight: 1.16,
+        maxLength: 76,
+      }),
+    ],
+  });
+}
+
+function iconBulletCard(
+  item: CardItem,
+  w: number,
+  h: number,
+  theme: AdaptiveTheme,
+  index: number,
+): ContainerElement {
+  const accent = theme.accents[index % theme.accents.length];
+  return containerCard({
+    w,
+    h,
+    fill: theme.surface,
+    stroke: theme.line,
+    r: 0.08,
+    children: [
+      ellipse({ x: 0.18, y: 0.16, w: 0.3, h: 0.3, fill: accent }),
+      rect({ x: 0.26, y: 0.24, w: 0.14, h: 0.035, fill: "FFFFFF", r: 0.02 }),
+      text({
+        x: 0.62,
+        y: 0.12,
+        w: 1.45,
+        h: 0.18,
+        value: item.title,
+        size: 9.2,
+        color: theme.ink,
+        bold: true,
+        maxLength: 34,
+      }),
+      text({
+        x: 2.12,
+        y: 0.13,
+        w: w - 2.34,
+        h: Math.max(0.18, h - 0.22),
+        value: item.body,
+        size: 7,
+        color: theme.muted,
+        lineHeight: 1.14,
+        maxLength: 66,
+      }),
+    ],
+  });
+}
+
+function teamMemberCard(
+  item: CardItem,
+  w: number,
+  h: number,
+  theme: AdaptiveTheme,
+  index: number,
+): ContainerElement {
+  const accent = theme.accents[index % theme.accents.length];
+  return containerCard({
+    w,
+    h,
+    fill: theme.surface,
+    stroke: theme.line,
+    r: 0.08,
+    children: [
+      ellipse({
+        x: 0.18,
+        y: 0.18,
+        w: 0.46,
+        h: 0.46,
+        fill: accent,
+        stroke: { color: "FFFFFF", width: 1 },
+      }),
+      text({
+        x: 0.18,
+        y: 0.31,
+        w: 0.46,
+        h: 0.14,
+        value: initials(item.title),
+        size: 7,
+        color: "FFFFFF",
+        bold: true,
+        align: "center",
+        wrap: "none",
+      }),
+      text({
+        x: 0.76,
+        y: 0.18,
+        w: w - 0.94,
+        h: 0.22,
+        value: item.title,
+        size: 9.5,
+        color: theme.ink,
+        bold: true,
+        maxLength: 30,
+      }),
+      text({
+        x: 0.76,
+        y: 0.43,
+        w: w - 0.94,
+        h: 0.18,
+        value: truncateText(item.body.split(/[.;]/)[0] || item.body, 38),
+        size: 7.2,
+        color: theme.primary,
+        bold: true,
+        maxLength: 38,
+      }),
+      text({
+        x: 0.22,
+        y: 0.78,
+        w: w - 0.44,
+        h: Math.max(0.18, h - 0.9),
+        value: item.body,
+        size: 6.8,
+        color: theme.muted,
+        lineHeight: 1.12,
+        maxLength: 68,
+      }),
+    ],
+  });
 }
 
 function containerCard({
@@ -1761,7 +3429,7 @@ function text({
     alignment:
       align || valign ? { horizontal: align, vertical: valign } : undefined,
     maxLength,
-    opacity,
+    opacity: normalizeOpacity(opacity),
   };
 }
 
@@ -1822,7 +3490,7 @@ function rect({
     type: "rectangle",
     position: { x, y },
     size: { width: w, height: h },
-    fill: { color: fill, opacity },
+    fill: { color: fill, opacity: normalizeOpacity(opacity) },
     stroke,
     borderRadius: r != null ? radius(r) : undefined,
   };
@@ -2000,6 +3668,12 @@ function tableCell(
   };
 }
 
+function normalizeOpacity(value: number | undefined) {
+  if (value == null || !Number.isFinite(value)) return undefined;
+  const normalized = value > 1 ? value / 100 : value;
+  return Math.min(Math.max(normalized, 0), 1);
+}
+
 function inferAdaptiveKind(
   content: GeneratedSlideContent,
   index: number,
@@ -2015,19 +3689,37 @@ function inferAdaptiveKind(
   if (/funnel/.test(inspired)) {
     return "metrics";
   }
-  if (/chart|graph|multi-chart/.test(inspired)) {
+  if (/chart|graph|multi-chart/.test(inspired) && hasUsableChart(content.chart)) {
     return "chart";
   }
   if (/metric|stat|snapshot|kpi/.test(inspired)) {
     return "metrics";
   }
-  if (/table/.test(inspired)) {
+  if (/table/.test(inspired) && hasUsableTable(content.table)) {
     return "table";
   }
   if (/thank|contact|closing/.test(inspired)) {
     return "closing";
   }
-  if (content.kind && content.kind !== "general" && content.kind !== "bullets") {
+  if (/bullet|numbered|icon/.test(inspired)) {
+    return "bullets";
+  }
+  if (/team|people|member/.test(inspired)) {
+    return "cards";
+  }
+  if (content.kind === "chart" && hasUsableChart(content.chart)) {
+    return "chart";
+  }
+  if (content.kind === "table" && hasUsableTable(content.table)) {
+    return "table";
+  }
+  if (
+    content.kind &&
+    content.kind !== "general" &&
+    content.kind !== "bullets" &&
+    content.kind !== "chart" &&
+    content.kind !== "table"
+  ) {
     return content.kind;
   }
   const haystack = [
@@ -2045,10 +3737,16 @@ function inferAdaptiveKind(
   if (tags.includes("metrics") || /metric|kpi|stat|score|growth|rate/.test(haystack)) {
     return "metrics";
   }
-  if (tags.includes("chart") || /trend|chart|graph|data|performance/.test(haystack)) {
+  if (
+    hasUsableChart(content.chart) &&
+    (tags.includes("chart") || /trend|chart|graph|data|performance/.test(haystack))
+  ) {
     return "chart";
   }
-  if (tags.includes("table") || /compare|matrix|table|options|pricing/.test(haystack)) {
+  if (
+    hasUsableTable(content.table) &&
+    (tags.includes("table") || /compare|matrix|table|options|pricing/.test(haystack))
+  ) {
     return "table";
   }
   return "general";
@@ -2162,6 +3860,54 @@ function metricItems(content: GeneratedSlideContent): GeneratedMetric[] {
     }));
   }
   return fallbackMetrics(0);
+}
+
+function funnelStages(
+  content: GeneratedSlideContent,
+  metrics: GeneratedMetric[],
+): Array<{ label: string; value: number }> {
+  const chartContent = content.chart;
+  if (chartContent && hasUsableChart(chartContent)) {
+    return chartContent.data.map((datum, index) => ({
+      label: truncateText(datum.label || `Stage ${index + 1}`, 28),
+      value: datum.value,
+    }));
+  }
+  const fromMetrics = metrics
+    .map((metric) => ({
+      label: truncateText(metric.label, 28),
+      value: numericMetricValue(metric.value),
+    }))
+    .filter((stage) => Number.isFinite(stage.value));
+  if (fromMetrics.length > 0) return fromMetrics;
+  return fallbackChart(content.title).data;
+}
+
+function numericMetricValue(value: string) {
+  const normalized = value.replace(/,/g, "").trim().toLowerCase();
+  const match = normalized.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return Number.NaN;
+  const number = Number(match[0]);
+  if (!Number.isFinite(number)) return Number.NaN;
+  if (normalized.includes("m")) return number * 1_000_000;
+  if (normalized.includes("k")) return number * 1_000;
+  return number;
+}
+
+function formatNumericLabel(value: number) {
+  const absolute = Math.abs(value);
+  if (absolute >= 1_000_000) return `${Math.round(value / 100_000) / 10}M`;
+  if (absolute >= 1_000) return `${Math.round(value / 100) / 10}k`;
+  return String(Math.round(value));
+}
+
+function initials(value: string) {
+  const parts = value
+    .replace(/[^\w\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+  return (parts.map((part) => part[0]?.toUpperCase()).join("") || "A").slice(0, 2);
 }
 
 function timelineItems(content: GeneratedSlideContent): TimelineItem[] {
@@ -2314,14 +4060,60 @@ function slideVariant(
   ) % 3;
 }
 
+function inspiredLayoutId(content: GeneratedSlideContent) {
+  return (content.inspiredLayoutId ?? "").toLowerCase();
+}
+
 function looksLikeVisualSplit(content: GeneratedSlideContent) {
-  const inspired = (content.inspiredLayoutId ?? "").toLowerCase();
+  const inspired = inspiredLayoutId(content);
   return /image|photo|double-image|media/.test(inspired);
 }
 
 function looksLikeQuoteLayout(content: GeneratedSlideContent) {
-  const inspired = (content.inspiredLayoutId ?? "").toLowerCase();
+  const inspired = inspiredLayoutId(content);
   return /quote/.test(inspired);
+}
+
+function looksLikeTeamLayout(content: GeneratedSlideContent) {
+  return /team|people|member/.test(inspiredLayoutId(content));
+}
+
+function looksLikeBulletLayout(content: GeneratedSlideContent) {
+  return /bullet|numbered|icon/.test(inspiredLayoutId(content));
+}
+
+function looksLikeNumberedBulletLayout(content: GeneratedSlideContent) {
+  return /numbered|two-column-numbered/.test(inspiredLayoutId(content));
+}
+
+function looksLikeSpotlightLayout(content: GeneratedSlideContent) {
+  return /side-insight|challenge-outcome|customer-card/.test(inspiredLayoutId(content));
+}
+
+function looksLikeColumnCardLayout(content: GeneratedSlideContent) {
+  return /three-column|three-columns|risk|constraint|label/.test(inspiredLayoutId(content));
+}
+
+function looksLikeMetricNarrativeLayout(content: GeneratedSlideContent) {
+  return /headline-text-with-stats|text-block-with-metric-cards/.test(
+    inspiredLayoutId(content),
+  );
+}
+
+function looksLikeMetricImageLayout(content: GeneratedSlideContent) {
+  return /metrics-with-image|image-with-title-and-metrics/.test(inspiredLayoutId(content));
+}
+
+function looksLikeFunnelLayout(content: GeneratedSlideContent) {
+  return /funnel/.test(inspiredLayoutId(content));
+}
+
+function looksLikeFullWidthChartLayout(content: GeneratedSlideContent) {
+  return /full-width-chart/.test(inspiredLayoutId(content));
+}
+
+function looksLikeMultiChartLayout(content: GeneratedSlideContent) {
+  return /multi-chart/.test(inspiredLayoutId(content));
 }
 
 function quoteText(content: GeneratedSlideContent) {
@@ -2434,17 +4226,117 @@ function normalizePlan(
     outline: nonEmpty(plan.outline, fallback.outline).slice(0, fallback.slides.length),
     slides: slides.map((slide, index) => {
       const fallbackSlide = fallback.slides[index % fallback.slides.length];
+      const chart = sanitizeGeneratedChart(slide.chart, slide.title ?? fallbackSlide.title);
+      const table = sanitizeGeneratedTable(slide.table);
+      const kind = sanitizeGeneratedKind(slide.kind, chart, table);
       return {
         ...fallbackSlide,
         ...slide,
         layoutIndex: clampInt(slide.layoutIndex, 0, layoutCount - 1),
+        kind,
         title: sanitizeSlideTitle(slide.title, fallbackSlide.title),
         body: cleanTextList(slide.body, fallbackSlide.body).slice(0, 12),
         bullets: cleanTextList(slide.bullets, fallbackSlide.bullets).slice(0, 8),
         metrics: nonEmpty(slide.metrics, fallbackSlide.metrics).slice(0, 8),
+        chart,
+        table,
       };
     }),
   };
+}
+
+function sanitizeGeneratedKind(
+  kind: GeneratedSlideKind | undefined,
+  chart: GeneratedChart | undefined,
+  table: GeneratedTable | undefined,
+): GeneratedSlideKind | undefined {
+  if (kind === "chart" && !hasUsableChart(chart)) return "cards";
+  if (kind === "table" && !hasUsableTable(table)) return "cards";
+  return kind;
+}
+
+function sanitizeGeneratedChart(
+  chartContent: GeneratedChart | undefined,
+  fallbackTitle: string,
+): GeneratedChart | undefined {
+  if (!chartContent) return undefined;
+
+  const data = chartContent.data
+    .filter((datum) => Number.isFinite(datum.value) && !isPlaceholderText(datum.label))
+    .slice(0, 8)
+    .map((datum) => ({
+      label: truncateText(datum.label, 40),
+      value: datum.value,
+    }));
+
+  if (data.length === 0) return undefined;
+
+  return {
+    title: isPlaceholderText(chartContent.title)
+      ? truncateText(fallbackTitle, 80)
+      : truncateText(chartContent.title, 80),
+    type:
+      chartContent.type === "donut" && data.some((datum) => datum.value < 0)
+        ? "bar"
+        : chartContent.type,
+    data,
+  };
+}
+
+function sanitizeGeneratedTable(
+  tableContent: GeneratedTable | undefined,
+): GeneratedTable | undefined {
+  if (!tableContent || !hasUsableTable(tableContent)) return undefined;
+
+  const columns = tableContent.columns
+    .map((column, index) =>
+      isPlaceholderText(column) ? `Column ${index + 1}` : truncateText(column, 40),
+    )
+    .slice(0, 6);
+  const rows = tableContent.rows
+    .filter((row) => row.some((cell) => !isPlaceholderText(cell)))
+    .slice(0, 7)
+    .map((row) =>
+      row.slice(0, columns.length).map((cell) =>
+        isPlaceholderText(cell) ? "-" : truncateText(cell, 60),
+      ),
+    );
+
+  return { columns, rows };
+}
+
+function hasUsableChart(chartContent: GeneratedChart | undefined) {
+  return Boolean(
+    chartContent?.data.some(
+      (datum) => Number.isFinite(datum.value) && !isPlaceholderText(datum.label),
+    ),
+  );
+}
+
+function hasUsableTable(tableContent: GeneratedTable | undefined) {
+  if (!tableContent) return false;
+  return tableContent.rows.some((row) =>
+    row.some((value) => !isPlaceholderText(value)),
+  );
+}
+
+function isPlaceholderText(value: string | undefined) {
+  const clean = normalizeScaffoldText(value ?? "");
+  return (
+    !clean ||
+    clean === "n" ||
+    clean === "a" ||
+    clean === "na" ||
+    clean === "n a" ||
+    clean === "none" ||
+    clean === "null" ||
+    clean === "tbd" ||
+    clean === "todo" ||
+    clean === "placeholder" ||
+    clean === "not applicable" ||
+    clean === "not available" ||
+    clean === "dummy"
+  );
 }
 
 function sanitizeSlideTitle(title: string | undefined, fallback: string) {

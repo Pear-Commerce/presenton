@@ -1,5 +1,5 @@
 import { useAtom, useAtomValue } from "jotai";
-import { FileText, FileUp, Palette, Play, Save } from "lucide-react";
+import { FileUp, Palette, Play, Save } from "lucide-react";
 import { useRef, type ChangeEvent, type ReactNode } from "react";
 import { styles } from "../editorStyles";
 import { truncateWords } from "../editorUtils";
@@ -70,11 +70,11 @@ export function EditorTopbar({
           <button
             type="button"
             onClick={handleSave}
-            style={styles.toolbarPrimaryButton}
+            style={styles.toolbarIconButton}
             title="Log current deck JSON"
+            aria-label="Save deck"
           >
-            <Save size={15} aria-hidden="true" />
-            Save
+            <Save size={16} aria-hidden="true" />
           </button>
           <input
             ref={pptxInputRef}
@@ -87,50 +87,39 @@ export function EditorTopbar({
             type="button"
             disabled={importingPptx}
             onClick={() => pptxInputRef.current?.click()}
-            style={styles.toolbarSecondaryButton}
-            title="Import PPTX"
+            style={styles.toolbarIconButton}
+            title={importingPptx ? "Importing PPTX" : "Import PPTX"}
+            aria-label={importingPptx ? "Importing PPTX" : "Import PPTX"}
           >
-            <FileUp size={15} aria-hidden="true" />
-            {importingPptx ? "Importing..." : "Import"}
+            <FileUp size={16} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={onOpenTheme}
+            style={styles.toolbarIconButton}
+            title="Configure deck theme"
+            aria-label="Configure deck theme"
+          >
+            <Palette size={16} aria-hidden="true" />
           </button>
         </div>
         <div style={layoutStyles.toolbarGroup}>
           <button
             type="button"
-            onClick={onOpenTheme}
-            style={styles.toolbarButton}
-            title="Configure deck theme"
-          >
-            <Palette size={15} aria-hidden="true" />
-            Theme
-          </button>
-          <button
-            type="button"
             onClick={() => setPresenting(true)}
-            style={styles.toolbarButton}
+            style={styles.toolbarSecondaryButton}
             title="Start presentation"
           >
             <Play size={15} aria-hidden="true" />
             Present
           </button>
-        </div>
-        <div style={layoutStyles.toolbarGroup}>
-          <button
-            type="button"
-            disabled={isExporting}
-            onClick={onPdfExport}
-            style={styles.toolbarSecondaryButton}
-            title="Export PDF"
-          >
-            <FileText size={15} aria-hidden="true" />
-            {exportingType === "pdf" ? "Exporting..." : "PDF"}
-          </button>
           <ExportPptxButton
             mode={exportMode}
             onModeChange={setExportMode}
             onExport={onExport}
+            onPdfExport={onPdfExport}
             isExporting={isExporting}
-            exportingLabel={exportingType === "pptx" ? "Exporting..." : null}
+            exportingType={exportingType}
           />
         </div>
       </div>

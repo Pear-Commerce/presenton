@@ -1,3 +1,4 @@
+import { Download } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { styles } from "../editorStyles";
 import type { ExportMode } from "../state";
@@ -28,14 +29,16 @@ export function ExportPptxButton({
   mode,
   onModeChange,
   onExport,
+  onPdfExport,
   isExporting,
-  exportingLabel,
+  exportingType,
 }: {
   mode: ExportMode;
   onModeChange: (mode: ExportMode) => void;
   onExport: (mode?: ExportMode) => void;
+  onPdfExport: () => void;
   isExporting: boolean;
-  exportingLabel: string | null;
+  exportingType: "pptx" | "pdf" | null;
 }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -56,24 +59,21 @@ export function ExportPptxButton({
     };
   }, [open]);
 
-  const activeOption = OPTIONS.find((option) => option.id === mode) ?? OPTIONS[0];
-  const activeLabel =
-    activeOption.id === "native"
-      ? "Native"
-      : activeOption.id === "keynote"
-        ? "Keynote"
-        : "Raster";
+  const exportLabel = exportingType ? "Exporting..." : "Export";
 
   return (
     <div ref={wrapperRef} style={styles.splitButton}>
       <button
         type="button"
         disabled={isExporting}
-        onClick={() => onExport()}
+        onClick={() => setOpen((value) => !value)}
         style={styles.splitButtonMain}
-        title={`Export as ${activeOption.label}`}
+        title="Export deck"
+        aria-haspopup="menu"
+        aria-expanded={open}
       >
-        {exportingLabel ?? `PPTX · ${activeLabel}`}
+        <Download size={15} aria-hidden="true" />
+        {exportLabel}
       </button>
       <button
         type="button"
@@ -82,12 +82,28 @@ export function ExportPptxButton({
         style={styles.splitButtonCaret}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Choose PPTX export type"
+        aria-label="Choose export type"
       >
         ▾
       </button>
       {open ? (
         <div role="menu" style={styles.exportMenu}>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onPdfExport();
+            }}
+            style={styles.exportMenuItem}
+          >
+            <div style={styles.exportMenuItemHeader}>
+              <span style={styles.exportMenuItemLabel}>PDF</span>
+            </div>
+            <div style={styles.exportMenuItemDesc}>
+              Render slides from the current editor surface
+            </div>
+          </button>
           {OPTIONS.map((option) => {
             const selected = option.id === mode;
             return (

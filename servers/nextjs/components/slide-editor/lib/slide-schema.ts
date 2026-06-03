@@ -131,7 +131,7 @@ export const ShadowSchema = z
 export const ChartDatumSchema = z
   .object({
     label: z.string().min(1).max(40),
-    value: z.number().min(0).max(1_000_000),
+    value: z.number().min(-1_000_000).max(1_000_000),
     color: HexColorSchema.nullish(),
   })
   .strict();

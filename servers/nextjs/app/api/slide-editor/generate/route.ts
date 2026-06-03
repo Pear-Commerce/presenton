@@ -1,5 +1,9 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import { generateText, Output } from "ai";
+import { generateText as generateAIText, Output } from "ai";
+import {
+  createOllama,
+  generateText as generateOllamaText,
+} from "ai-sdk-ollama";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -7,7 +11,9 @@ import {
   buildAdaptiveGeneratedDeck,
   createLayoutCatalog,
   fallbackGeneratedPlan,
+  type GeneratedChart,
   type GeneratedDeckPlan,
+  type GeneratedTable,
 } from "@/components/slide-editor/lib/ai-slide-generation";
 import type {
   GenerationLayoutKind,
@@ -19,12 +25,23 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
+const DEFAULT_OLLAMA_MODEL = "gemma4";
+const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
+
+type GenerationModelProvider = "openai" | "ollama";
+
+type GenerationModelSelection = {
+  provider: GenerationModelProvider;
+  modelId: string;
+};
 
 type ModelGeneratedSlide = Omit<
   GeneratedDeckPlan["slides"][number],
-  "layoutIndex" | "inspiredLayoutId"
+  "layoutIndex" | "inspiredLayoutId" | "chart" | "table"
 > & {
   layoutId: string;
+  chart: GeneratedChart | null;
+  table: GeneratedTable | null;
 };
 
 type ModelDeckPlan = Omit<GeneratedDeckPlan, "slides"> & {
@@ -36,6 +53,7 @@ const RequestSchema = z
     description: z.string().min(8).max(4000),
     slideCount: z.number().int().min(1).max(20),
     templateId: z.string().min(1).max(80),
+    modelProvider: z.enum(["openai", "ollama"]).optional(),
     model: z.string().min(1).max(160).optional(),
   })
   .strict();
@@ -74,73 +92,260 @@ export async function POST(request: Request) {
     fallbackGeneratedPlan(template.deck, description, slideCount),
     generationLayouts,
   );
-  const apiKey = process.env.OPENAI_API_KEY?.trim() ?? "";
-  const modelId =
-    parsed.data.model ??
-    process.env.SLIDE_EDITOR_OPENAI_MODEL ??
-    process.env.OPENAI_MODEL ??
-    DEFAULT_OPENAI_MODEL;
+  const modelSelection = resolveModelSelection(parsed.data);
+  const openAIApiKey = process.env.OPENAI_API_KEY?.trim() ?? "";
   const warnings: string[] = [];
   let plan: GeneratedDeckPlan = fallback;
   let source: "ai" | "fallback" = "fallback";
 
-  if (apiKey) {
+  if (modelSelection.provider === "openai" && !openAIApiKey) {
+    warnings.push(
+      "OPENAI_API_KEY is not configured. Used fallback content.",
+    );
+  } else {
     try {
-      const openai = createOpenAI({ apiKey });
+      const languageModel = createGenerationLanguageModel(
+        modelSelection,
+        openAIApiKey,
+      );
       const schema = createPlanSchema(slideCount, generationLayouts);
-      const result = await generateText({
-        model: openai.responses(modelId),
-        temperature: 0.25,
-        maxOutputTokens: 4500,
-        output: Output.object({
-          schema,
-          name: "slide_editor_deck_plan",
-          description:
-            "Content-only plan for generating editable slide-editor slides.",
-        }),
-        system: getSystemPrompt(slideCount),
-        prompt: getUserPrompt({
-          description,
-          slideCount,
-          templateLabel: template.label,
-          generationLayouts,
-        }),
+      const modelPlan = await generateStructuredPlan({
+        languageModel,
+        schema,
+        description,
+        slideCount,
+        templateLabel: template.label,
+        generationLayouts,
+        provider: modelSelection.provider,
       });
       plan = resolveModelPlanLayoutSelections(
-        result.output,
+        modelPlan,
         generationLayouts,
         fallback,
       );
       source = "ai";
     } catch (error) {
-      console.warn("[slide-editor/generate] OpenAI generation failed", error);
-      warnings.push(
-        error instanceof Error
-          ? `OpenAI generation failed: ${error.message}`
-          : "OpenAI generation failed. Used fallback content.",
+      const warning = generationFailureWarning(
+        modelSelection.provider,
+        error,
       );
+      console.warn("[slide-editor/generate] AI generation failed:", warning);
+      warnings.push(warning);
     }
-  } else {
-    warnings.push(
-      "OPENAI_API_KEY is not configured. Used fallback content.",
-    );
   }
 
-  const deck = buildAdaptiveGeneratedDeck({
-    template: template.deck,
-    plan,
-    description,
-    slideCount,
-  });
+  try {
+    const deck = buildAdaptiveGeneratedDeck({
+      template: template.deck,
+      plan,
+      description,
+      slideCount,
+    });
 
-  return NextResponse.json({
-    deck,
-    templateId: template.id,
-    templateLabel: template.label,
-    source,
-    model: source === "ai" ? modelId : null,
-    warnings,
-  });
+    return NextResponse.json({
+      deck,
+      templateId: template.id,
+      templateLabel: template.label,
+      source,
+      modelProvider: source === "ai" ? modelSelection.provider : null,
+      model: source === "ai" ? modelSelection.modelId : null,
+      warnings,
+    });
+  } catch (error) {
+    console.error("[slide-editor/generate] Deck build failed", error);
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? `Failed to build generated deck: ${error.message}`
+            : "Failed to build generated deck.",
+        templateId: template.id,
+        templateLabel: template.label,
+        source,
+        modelProvider: source === "ai" ? modelSelection.provider : null,
+        model: source === "ai" ? modelSelection.modelId : null,
+        warnings,
+      },
+      { status: 500 },
+    );
+  }
+}
+
+function resolveModelSelection({
+  modelProvider,
+  model,
+}: {
+  modelProvider?: GenerationModelProvider;
+  model?: string;
+}): GenerationModelSelection {
+  const inferredProvider =
+    modelProvider ??
+    (model?.toLowerCase().includes("gemma") ? "ollama" : "openai");
+
+  if (inferredProvider === "ollama") {
+    return {
+      provider: "ollama",
+      modelId:
+        model ??
+        process.env.SLIDE_EDITOR_OLLAMA_MODEL ??
+        process.env.OLLAMA_MODEL ??
+        DEFAULT_OLLAMA_MODEL,
+    };
+  }
+
+  return {
+    provider: "openai",
+    modelId:
+      model ??
+      process.env.SLIDE_EDITOR_OPENAI_MODEL ??
+      process.env.OPENAI_MODEL ??
+      DEFAULT_OPENAI_MODEL,
+  };
+}
+
+function createGenerationLanguageModel(
+  selection: GenerationModelSelection,
+  openAIApiKey: string,
+) {
+  if (selection.provider === "ollama") {
+    const ollama = createOllama({
+      baseURL: ollamaBaseURL(),
+      apiKey: process.env.OLLAMA_API_KEY?.trim() || undefined,
+    });
+    return ollama(selection.modelId, {
+      structuredOutputs: true,
+      reliableObjectGeneration: true,
+      objectGenerationOptions: {
+        maxRetries: 3,
+        attemptRecovery: true,
+        useFallbacks: true,
+        fixTypeMismatches: true,
+        enableTextRepair: true,
+      },
+      options: {
+        temperature: 0.15,
+        num_ctx: 8192,
+      },
+    });
+  }
+
+  const openai = createOpenAI({ apiKey: openAIApiKey });
+  return openai.responses(selection.modelId);
+}
+
+function ollamaBaseURL() {
+  const configured =
+    process.env.SLIDE_EDITOR_OLLAMA_BASE_URL?.trim() ??
+    process.env.OLLAMA_BASE_URL?.trim() ??
+    "";
+  if (!configured) return DEFAULT_OLLAMA_BASE_URL;
+  return configured.replace(/\/(?:v1|api)\/?$/, "").replace(/\/+$/, "");
+}
+
+function providerLabel(provider: GenerationModelProvider) {
+  return provider === "ollama" ? "Ollama" : "OpenAI";
+}
+
+function generationFailureWarning(
+  provider: GenerationModelProvider,
+  error: unknown,
+) {
+  const label = providerLabel(provider);
+  if (!(error instanceof Error)) {
+    return `${label} generation failed. Used fallback content.`;
+  }
+
+  return `${label} generation failed: ${truncateWarning(
+    summarizeGenerationError(error),
+  )}. Used fallback content.`;
+}
+
+function summarizeGenerationError(error: Error) {
+  const zodSummary = summarizeZodCause(error);
+  if (zodSummary) return zodSummary;
+  return error.message || "Unknown generation error";
+}
+
+function summarizeZodCause(error: Error) {
+  const queue: unknown[] = [error];
+  const seen = new Set<unknown>();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || seen.has(current)) continue;
+    seen.add(current);
+
+    if (current instanceof z.ZodError) {
+      return current.issues
+        .slice(0, 2)
+        .map((issue) => {
+          const path = issue.path.length ? issue.path.join(".") : "output";
+          return `${path}: ${issue.message}`;
+        })
+        .join("; ");
+    }
+
+    if (current instanceof Error) {
+      queue.push((current as Error & { cause?: unknown }).cause);
+    }
+  }
+
+  return null;
+}
+
+function truncateWarning(message: string) {
+  return message.length > 280 ? `${message.slice(0, 280)}...` : message;
+}
+
+async function generateStructuredPlan({
+  languageModel,
+  schema,
+  description,
+  slideCount,
+  templateLabel,
+  generationLayouts,
+  provider,
+}: {
+  languageModel: Parameters<typeof generateAIText>[0]["model"];
+  schema: ReturnType<typeof createPlanSchema>;
+  description: string;
+  slideCount: number;
+  templateLabel: string;
+  generationLayouts: ReadonlyArray<GenerationLayoutMetadata>;
+  provider: GenerationModelProvider;
+}): Promise<ModelDeckPlan> {
+  const options = {
+    model: languageModel,
+    temperature: provider === "ollama" ? 0.15 : 0.25,
+    maxOutputTokens: 4500,
+    output: Output.object({
+      schema,
+      name: "slide_editor_deck_plan",
+      description:
+        "Content-only plan for generating editable slide-editor slides.",
+    }),
+    system: getSystemPrompt(slideCount),
+    prompt: getUserPrompt({
+      description,
+      slideCount,
+      templateLabel,
+      generationLayouts,
+    }),
+  } satisfies Parameters<typeof generateAIText>[0];
+
+  const result =
+    provider === "ollama"
+      ? await generateOllamaText({
+          ...options,
+          enhancedOptions: {
+            enableSynthesis: true,
+            maxSynthesisAttempts: 2,
+            minResponseLength: 1,
+          },
+        })
+      : await generateAIText(options);
+
+  return result.output;
 }
 
 function createPlanSchema(
@@ -200,14 +405,15 @@ function createPlanSchema(
                       z
                         .object({
                           label: z.string().min(1).max(40),
-                          value: z.number().min(0).max(1000000),
+                          value: z.number().min(-1000000).max(1000000),
                         })
                         .strict(),
                     )
                     .min(1)
                     .max(8),
                 })
-                .strict(),
+                .strict()
+                .nullable(),
               table: z
                 .object({
                   columns: z.array(z.string().min(1).max(40)).min(1).max(6),
@@ -216,7 +422,8 @@ function createPlanSchema(
                     .min(1)
                     .max(7),
                 })
-                .strict(),
+                .strict()
+                .nullable(),
               imagePrompt: z.string().min(0).max(120),
             })
             .strict(),
@@ -240,10 +447,13 @@ If ${slideCount} is greater than 2, the final slide should be kind=closing with 
 Set kind to the semantic slide type: cover, timeline, metrics, chart, table, cards, bullets, general, or closing.
 Keep kind compatible with layoutId: timeline layouts use timeline, chart layouts use chart, table layouts use table, metrics/stat layouts use metrics, image/text split and quote layouts use cards or general, team layouts use cards, thank/contact layouts use closing.
 Use chart/table/metrics fields only when they support the requested content.
+Set chart to null unless the slide needs a real subject-specific chart.
+Set table to null unless the slide needs a real comparison, timeline, or matrix.
+Chart data values may be negative for real declines, losses, contractions, or below-baseline rates.
 Always provide body, bullets, metrics, chart, table, and imagePrompt fields for every slide.
 Use empty bullets and metrics arrays when they do not add subject-specific value; never add filler just to occupy a layout area.
 For cover slides, body should contain the main promise/summary, and bullets should be empty unless each bullet is concrete to the user's subject.
-Unused chart/table fields can contain simple relevant fallback data because they will not be rendered unless the slide kind needs them.
+Never use placeholders such as N/A, none, not applicable, placeholder, TBD, or dummy 0 values for chart or table content.
 Do not copy layout names, schema field names, outline labels, or planning labels into visible slide copy.
 Avoid generic scaffolding phrases such as "overview priorities", "audience impact", "risks, constraints, and assumptions", and "recommended next action"; write subject-specific content instead.
 For weak/local models: keep every field simple, literal, and short.`;
@@ -330,10 +540,12 @@ function resolveModelPlanLayoutSelections(
       const layout =
         layoutById.get(slide.layoutId) ??
         findCompatibleGenerationLayout(slide.kind, generationLayouts);
-      const { layoutId, ...content } = slide;
+      const { chart, layoutId, table, ...content } = slide;
 
       return {
         ...content,
+        chart: chart ?? undefined,
+        table: table ?? undefined,
         layoutIndex: layout?.slideIndex ?? fallbackSlide.layoutIndex,
         inspiredLayoutId:
           layout?.layoutId ?? fallbackSlide.inspiredLayoutId ?? layoutId,

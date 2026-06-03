@@ -19,7 +19,36 @@ export type SlideGenerationInput = {
   description: string;
   slideCount: number;
   templateId: string;
+  modelProvider: GenerationModelProvider;
+  model: string;
 };
+
+export type GenerationModelProvider = "openai" | "ollama";
+
+type GenerationModelOption = {
+  id: string;
+  label: string;
+  description: string;
+  provider: GenerationModelProvider;
+  model: string;
+};
+
+const GENERATION_MODEL_OPTIONS: ReadonlyArray<GenerationModelOption> = [
+  {
+    id: "openai",
+    label: "OpenAI",
+    description: "Uses the configured OpenAI API key and model.",
+    provider: "openai",
+    model: "gpt-4.1-mini",
+  },
+  {
+    id: "gemma4",
+    label: "Gemma 4",
+    description: "Uses the local Ollama OpenAI-compatible endpoint.",
+    provider: "ollama",
+    model: "gemma4",
+  },
+];
 
 export function GenerateSlidesModal({
   initialTemplateId,
@@ -37,20 +66,33 @@ export function GenerateSlidesModal({
   const [description, setDescription] = useState("");
   const [slideCount, setSlideCount] = useState(6);
   const [templateId, setTemplateId] = useState(initialTemplateId);
+  const [modelOptionId, setModelOptionId] = useState(
+    GENERATION_MODEL_OPTIONS[0].id,
+  );
 
   useEffect(() => {
     setTemplateId(initialTemplateId);
   }, [initialTemplateId]);
 
+  const selectedTemplateDescription =
+    templates.find((template) => template.id === templateId)?.description ?? "";
+  const selectedModelDescription =
+    GENERATION_MODEL_OPTIONS.find((option) => option.id === modelOptionId)
+      ?.description ?? "";
   const canGenerate = description.trim().length >= 8 && !generating;
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!canGenerate) return;
+    const modelOption =
+      GENERATION_MODEL_OPTIONS.find((option) => option.id === modelOptionId) ??
+      GENERATION_MODEL_OPTIONS[0];
     await onGenerate({
       description: description.trim(),
       slideCount,
       templateId,
+      modelProvider: modelOption.provider,
+      model: modelOption.model,
     });
   };
 
@@ -104,24 +146,39 @@ export function GenerateSlidesModal({
             />
           </label>
           <label style={styles.field}>
-            Template
+            Model
             <select
-              value={templateId}
-              onChange={(event) => setTemplateId(event.target.value)}
+              value={modelOptionId}
+              onChange={(event) => setModelOptionId(event.target.value)}
               style={styles.input}
             >
-              {templates.map((template) => (
-                <option key={template.id} value={template.id}>
-                  {template.label}
+              {GENERATION_MODEL_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
                 </option>
               ))}
             </select>
           </label>
         </div>
 
+        <label style={styles.field}>
+          Template
+          <select
+            value={templateId}
+            onChange={(event) => setTemplateId(event.target.value)}
+            style={styles.input}
+          >
+            {templates.map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <div style={modalStyles.templateDescription}>
-          {templates.find((template) => template.id === templateId)
-            ?.description ?? ""}
+          <div>{selectedTemplateDescription}</div>
+          <div style={modalStyles.modelDescription}>{selectedModelDescription}</div>
         </div>
 
         <div style={modalStyles.actions}>
@@ -216,6 +273,10 @@ const modalStyles = {
     color: editorTheme.mutedStrong,
     fontSize: 12,
     lineHeight: 1.35,
+  },
+  modelDescription: {
+    marginTop: 6,
+    color: editorTheme.muted,
   },
   actions: {
     display: "flex",

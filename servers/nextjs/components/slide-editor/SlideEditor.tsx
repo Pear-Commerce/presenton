@@ -197,9 +197,17 @@ function SlideEditorBody({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
       });
-      const payload = await response.json();
+      const payload = await readGenerationResponse(response);
       if (!response.ok) {
-        throw new Error(payload?.error ?? "Failed to generate slides.");
+        throw new Error(
+          payload.error ??
+            `Failed to generate slides. Server returned ${response.status}.`,
+        );
+      }
+      if (!payload.deck || !payload.templateId) {
+        throw new Error(
+          payload.error ?? "Slide generation returned an incomplete response.",
+        );
       }
       resetEditorState(payload.templateId, payload.deck);
       setGenerationOpen(false);
@@ -320,6 +328,34 @@ function SlideEditorBody({
   );
 }
 
+async function readGenerationResponse(response: Response): Promise<{
+  deck?: Deck;
+  templateId?: string;
+  warnings?: string[];
+  error?: string;
+}> {
+  const text = await response.text();
+  if (!text.trim()) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {
+      error: response.ok
+        ? "Slide generation returned an invalid JSON response."
+        : truncateResponseText(text),
+    };
+  }
+}
+
+function truncateResponseText(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) return "Slide generation returned an empty response.";
+  return trimmed.length > 320 ? `${trimmed.slice(0, 320)}...` : trimmed;
+}
+
 function TemplateSelect({
   importedLabel,
   value,
@@ -379,9 +415,9 @@ function useEditorHotkeys() {
 
 const templateSelectStyle = {
   ...styles.input,
-  width: 220,
-  height: 32,
-  padding: "0 8px",
+  width: 205,
+  height: 36,
+  padding: "0 9px",
   border: "1px solid transparent",
   background: "transparent",
   boxShadow: "none",

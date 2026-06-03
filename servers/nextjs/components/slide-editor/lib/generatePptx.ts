@@ -33,6 +33,7 @@ import {
   resolveElementLayout,
   resolveSlideLayout,
 } from "./layout-resolver";
+import { embedDeckImageData } from "./image-export";
 import {
   fitBulletsFontToBox,
   fitFontToBox,
@@ -949,7 +950,11 @@ export async function generatePptx(
   pptx.defineLayout({ name: "PPTY_16x9", width: SLIDE_W, height: SLIDE_H });
   pptx.layout = "PPTY_16x9";
 
-  for (const slide of deck.slides) await addSlide(pptx, slide, resolvedOptions);
+  const exportDeck = await embedDeckImageData(deck);
+
+  for (const slide of exportDeck.slides) {
+    await addSlide(pptx, slide, resolvedOptions);
+  }
 
   // Build the PPTX in-memory, then reopen it as a zip and drop our deck
   // JSON sidecar alongside `ppt/`. PowerPoint ignores files outside the
@@ -961,7 +966,7 @@ export async function generatePptx(
     outputType: "arraybuffer",
   })) as ArrayBuffer;
   const zip = await JSZip.loadAsync(buffer);
-  zip.file(PPTY_DECK_SIDECAR_PATH, JSON.stringify(deck));
+  zip.file(PPTY_DECK_SIDECAR_PATH, JSON.stringify(exportDeck));
   const finalBlob = await zip.generateAsync({ type: "blob" });
 
   triggerDownload(finalBlob, filename);
