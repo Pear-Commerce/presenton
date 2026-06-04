@@ -361,6 +361,79 @@ def test_validate_slide_json_contract_requires_visible_locked_text():
     assert "changed_table_values" not in reasons
 
 
+def test_validate_slide_json_contract_rejects_generic_placeholders():
+    state = build_generation_contract_state(strict_request())
+    slide_json = [
+        {
+            "title": "Executive Answer",
+            "body": "\n".join(
+                [
+                    "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
+                    "Retailer X outpaced Retailer Alpha in Campaign A from Source Beta.",
+                ]
+            ),
+            "tableData": {
+                "headers": ["Retailer", "Visit Rate", "Date"],
+                "rows": [["Target", "7.1%", "2026-05-16"]],
+            },
+        }
+    ]
+
+    issues = validate_slide_json_contract(state, slide_json)
+    placeholder_issue = next(
+        issue for issue in issues if issue.reason == "generic_placeholder_content"
+    )
+
+    assert placeholder_issue.stage == "slide_content"
+    assert placeholder_issue.actual == [
+        "Retailer X",
+        "Retailer Alpha",
+        "Campaign A",
+        "Source Beta",
+    ]
+
+
+def test_strict_contract_accepts_concrete_retailer_campaign_source_terms(monkeypatch):
+    state = build_generation_contract_state(strict_request())
+    body = "\n".join(
+        [
+            "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
+            "Target, Kroger, and Whole Foods were reviewed using the Spring Savings campaign and Numerator panel source.",
+        ]
+    )
+    slide_json = [
+        {
+            "title": "Executive Answer",
+            "body": body,
+            "tableData": {
+                "headers": ["Retailer", "Visit Rate", "Date"],
+                "rows": [["Target", "7.1%", "2026-05-16"]],
+            },
+        }
+    ]
+    text = "\n".join(
+        [
+            "Executive Answer",
+            body,
+            "Retailer",
+            "Visit Rate",
+            "Date",
+            "Target",
+            "7.1%",
+            "2026-05-16",
+        ]
+    )
+
+    monkeypatch.setattr(
+        generation_contract_module,
+        "_extract_pptx",
+        lambda _path: (text, []),
+    )
+
+    assert validate_slide_json_contract(state, slide_json) == []
+    assert validate_pptx_contract(state, "/tmp/deck.pptx") == []
+
+
 def test_validate_pptx_contract_accepts_visible_text_table_export(monkeypatch):
     state = build_generation_contract_state(strict_request())
     text = "\n".join(
@@ -383,6 +456,38 @@ def test_validate_pptx_contract_accepts_visible_text_table_export(monkeypatch):
     )
 
     assert validate_pptx_contract(state, "/tmp/deck.pptx") == []
+
+
+def test_validate_pptx_contract_rejects_generic_placeholders(monkeypatch):
+    state = build_generation_contract_state(strict_request())
+    text = "\n".join(
+        [
+            "Executive Answer",
+            "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
+            "Retailer",
+            "Visit Rate",
+            "Date",
+            "Target",
+            "7.1%",
+            "2026-05-16",
+            "Retailer Gamma",
+            "Source Placeholder",
+        ]
+    )
+
+    monkeypatch.setattr(
+        generation_contract_module,
+        "_extract_pptx",
+        lambda _path: (text, []),
+    )
+
+    issues = validate_pptx_contract(state, "/tmp/deck.pptx")
+    placeholder_issue = next(
+        issue for issue in issues if issue.reason == "generic_placeholder_content"
+    )
+
+    assert placeholder_issue.stage == "pptx_export"
+    assert placeholder_issue.actual == ["Retailer Gamma", "Source Placeholder"]
 
 
 def test_strict_contract_relaxes_table_minimums_for_exact_evidence():

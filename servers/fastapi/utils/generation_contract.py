@@ -31,6 +31,19 @@ DATE_CAPTION_TRAILING_GUIDANCE_RE = re.compile(
     r"\s*[.;]?\s+keep\s+this\s+near\b.*$",
     re.IGNORECASE,
 )
+PLACEHOLDER_ENTITY_NOUN_RE = (
+    r"(?:Retailer|retailer|RETAILER|Campaign|campaign|CAMPAIGN|Source|source|SOURCE)"
+)
+PLACEHOLDER_TOKEN_RE = (
+    r"(?:[ABCXYZ]|Alpha|Beta|Gamma|Delta|ALPHA|BETA|GAMMA|DELTA|"
+    r"Placeholder|Sample|Example|Generic|"
+    r"PLACEHOLDER|SAMPLE|EXAMPLE|GENERIC)"
+)
+GENERIC_PLACEHOLDER_LABEL_RE = re.compile(
+    rf"\b(?P<label>{PLACEHOLDER_ENTITY_NOUN_RE}\s+{PLACEHOLDER_TOKEN_RE}|"
+    rf"(?:Placeholder|Sample|Example|Generic|PLACEHOLDER|SAMPLE|EXAMPLE|GENERIC)"
+    rf"\s+{PLACEHOLDER_ENTITY_NOUN_RE})\b"
+)
 
 
 @dataclass
@@ -129,6 +142,42 @@ def _strings(values: Iterable[Any]) -> list[str]:
         if text:
             result.append(text)
     return result
+
+
+def _generic_placeholder_labels(values: Iterable[Any]) -> list[str]:
+    labels = []
+    seen = set()
+    for value in values or []:
+        for segment in str(value or "").splitlines():
+            text = _clean_text(segment)
+            if not text:
+                continue
+            for match in GENERIC_PLACEHOLDER_LABEL_RE.finditer(text):
+                label = _clean_text(match.group("label"))
+                key = _norm(label)
+                if key in seen:
+                    continue
+                seen.add(key)
+                labels.append(label)
+    return labels
+
+
+def _generic_placeholder_issues(
+    values: Iterable[Any],
+    *,
+    stage: str,
+) -> list[ContractIssue]:
+    labels = _generic_placeholder_labels(values)
+    if not labels:
+        return []
+    return [
+        ContractIssue(
+            reason="generic_placeholder_content",
+            message="Strict contract output contains obvious synthetic placeholder labels.",
+            stage=stage,
+            actual=labels,
+        )
+    ]
 
 
 def _contract_obj(contract: Any, name: str, default: Any) -> Any:
@@ -989,7 +1038,11 @@ def validate_slide_json_contract(
     if not state.enabled:
         return []
     issues = validate_structure(state, len(slide_contents), stage="slide_content")
-    full_text = "\n".join(visible_text_from_json(slide) for slide in slide_contents)
+    visible_strings = [
+        text for slide in slide_contents for text in _walk_visible_strings(slide)
+    ]
+    issues.extend(_generic_placeholder_issues(visible_strings, stage="slide_content"))
+    full_text = "\n".join(visible_strings)
     normalized_full = _norm(full_text)
 
     for locked in state.locked_text:
@@ -1092,7 +1145,10 @@ def validate_pptx_contract(
     if not state.enabled or not path:
         return []
     text, tables = _extract_pptx(path)
-    issues: list[ContractIssue] = []
+    issues: list[ContractIssue] = _generic_placeholder_issues(
+        text.splitlines(),
+        stage="pptx_export",
+    )
     for locked in state.locked_text:
         if locked not in text:
             issues.append(
