@@ -9,15 +9,27 @@ from pptx import Presentation
 
 SECTION_HEADING_RE = re.compile(r"^\s*#{1,6}\s*(?:(\d+)[.)]?\s*)?(.*?)\s*$")
 TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
-DATE_RE = re.compile(
-    r"\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/20\d{2}|"
-    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)"
-    r"[a-z]*\s+\d{1,2},?\s+20\d{2})\b",
-    re.IGNORECASE,
-)
 METRIC_RE = re.compile(
     r"(?<![\w.])[+-]?\$?\d[\d,]*(?:\.\d+)?%?"
     r"(?:\s?(?:pp|bps|ms|sec|secs|seconds|m|k|K|M|B))?(?![\w.])"
+)
+DATE_CAPTION_LABEL_RE = re.compile(
+    r"^(?:selected\s+period|prior\s+period|date\s+range|date\s+context|"
+    r"half[-\s]?period\s+definitions?|date\s+caption(?:\s+wrappers?)?)\b"
+    r"(?::|\s|$)",
+    re.IGNORECASE,
+)
+DATE_CAPTION_TAG_RE = re.compile(
+    r"</?(?:date|period)[_\s-]*(?:caption|context|range|wrapper)s?>",
+    re.IGNORECASE,
+)
+DATE_CAPTION_WRAPPER_PREFIX_RE = re.compile(
+    r"^date\s+caption(?:\s+wrappers?)?\s*:\s*",
+    re.IGNORECASE,
+)
+DATE_CAPTION_TRAILING_GUIDANCE_RE = re.compile(
+    r"\s*[.;]?\s+keep\s+this\s+near\b.*$",
+    re.IGNORECASE,
 )
 
 
@@ -306,14 +318,55 @@ def _dedupe_text_blocks(blocks: Iterable[ContractTextBlock]) -> list[ContractTex
     return result
 
 
-def _extract_source_exact_terms(slides_markdown: list[str]) -> list[str]:
-    text = "\n".join(slides_markdown or [])
+def _source_text(slides_markdown: list[str]) -> str:
+    return "\n".join(slides_markdown or [])
+
+
+def _extract_source_metric_terms(slides_markdown: list[str]) -> set[str]:
     terms = set()
-    for pattern in (DATE_RE, METRIC_RE):
-        for match in pattern.findall(text):
-            cleaned = _clean_text(match)
-            if cleaned and not cleaned.isdigit():
-                terms.add(cleaned)
+    for match in METRIC_RE.findall(_source_text(slides_markdown)):
+        cleaned = _clean_text(match)
+        if cleaned and not cleaned.isdigit():
+            terms.add(cleaned)
+    return terms
+
+
+def _normalize_date_caption_line(line: str) -> str:
+    text = _clean_text(line)
+    text = re.sub(r"^\s*#{1,6}\s*", "", text)
+    text = re.sub(r"^\s*(?:[-*+]\s*|\d+[.)]\s*|>\s*)+", "", text)
+    text = DATE_CAPTION_TAG_RE.sub("", text)
+    text = text.replace("**", "").replace("__", "").replace("`", "")
+    text = re.sub(r"\s+[-\u2013\u2014]\s+", " - ", text)
+    text = re.sub(r"\s*:\s*", ": ", text)
+    text = DATE_CAPTION_WRAPPER_PREFIX_RE.sub("", text)
+    text = DATE_CAPTION_TRAILING_GUIDANCE_RE.sub("", text)
+    return _clean_text(text).strip("*_ ")
+
+
+def _is_date_caption_term(caption: str) -> bool:
+    if not (
+        DATE_CAPTION_LABEL_RE.match(caption)
+        or re.match(r"^(?:selected|prior)\s*:", caption, re.IGNORECASE)
+    ):
+        return False
+    if caption.rstrip().endswith(":"):
+        return False
+    return ":" in caption or bool(re.search(r"\b20\d{2}\b", caption))
+
+
+def _extract_source_date_caption_terms(slides_markdown: list[str]) -> set[str]:
+    terms = set()
+    for line in _source_text(slides_markdown).splitlines():
+        caption = _normalize_date_caption_line(line)
+        if caption and _is_date_caption_term(caption):
+            terms.add(caption)
+    return terms
+
+
+def _extract_source_exact_terms(slides_markdown: list[str]) -> list[str]:
+    terms = _extract_source_metric_terms(slides_markdown)
+    terms.update(_extract_source_date_caption_terms(slides_markdown))
     return sorted(terms, key=lambda item: (len(item), item.lower()))
 
 

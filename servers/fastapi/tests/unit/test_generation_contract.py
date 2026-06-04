@@ -125,6 +125,78 @@ def test_strict_contract_dedupes_same_slide_table_from_contract_and_markdown():
     assert contract_table_issues_for_schema(schema, state, 1) == []
 
 
+def test_strict_contract_does_not_promote_prose_only_iso_dates():
+    selected_period = "Selected period: February 15 - May 16, 2026"
+    request = strict_request(
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Executive Answer",
+                    "",
+                    "Question: What changed between 2026-02-15 and 2026-05-16?",
+                    selected_period,
+                    "Visit rate improved to 7.1%.",
+                ]
+            )
+        ],
+        generation_contract={
+            "locked_text": [],
+            "forbidden_additions": [],
+            "tables_are_evidence": False,
+        },
+    )
+    state = build_generation_contract_state(request)
+
+    assert "2026-02-15" not in state.exact_terms
+    assert "2026-05-16" not in state.exact_terms
+    assert selected_period in state.exact_terms
+
+    issues = validate_slide_json_contract(
+        state,
+        [
+            {
+                "title": "Executive Answer",
+                "caption": selected_period,
+                "body": "Visit rate improved to 7.1%.",
+            }
+        ],
+    )
+
+    assert issues == []
+
+
+def test_strict_contract_normalizes_date_caption_wrappers():
+    markdown_caption = (
+        "Date caption: Selected: Feb 15-May 16, 2026 | "
+        "Prior: Nov 16, 2025-Feb 14, 2026. Keep this near the footer."
+    )
+    clean_caption = (
+        "Selected: Feb 15-May 16, 2026 | "
+        "Prior: Nov 16, 2025-Feb 14, 2026"
+    )
+    request = strict_request(
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Executive Answer",
+                    "",
+                    markdown_caption,
+                ]
+            )
+        ],
+        generation_contract={
+            "locked_text": [],
+            "forbidden_additions": [],
+            "tables_are_evidence": False,
+        },
+    )
+    state = build_generation_contract_state(request)
+
+    assert clean_caption in state.exact_terms
+    assert all("Date caption" not in term for term in state.exact_terms)
+    assert all("Keep this near" not in term for term in state.exact_terms)
+
+
 def test_strict_contract_rejects_missing_locked_source_text():
     request = strict_request(
         generation_contract={
