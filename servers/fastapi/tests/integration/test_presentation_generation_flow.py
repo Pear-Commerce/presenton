@@ -69,7 +69,7 @@ def test_generate_presentation_handler_full_flow_uses_mocked_dependencies(fake_a
     ), patch.object(
         presentation_endpoint,
         "generate_presentation_structure",
-        new=AsyncMock(return_value=PresentationStructureModel(slides=[0, 0])),
+        new=AsyncMock(return_value=PresentationStructureModel(slides=[0, 1])),
     ), patch.object(
         presentation_endpoint,
         "get_slide_content_from_type_and_outline",
@@ -221,7 +221,7 @@ def test_generate_presentation_handler_strict_mode_preserves_markdown_table(fake
     ), patch.object(
         presentation_endpoint,
         "generate_presentation_structure",
-        new=AsyncMock(return_value=PresentationStructureModel(slides=[0, 1])),
+        new=AsyncMock(return_value=PresentationStructureModel(slides=[0, 0])),
     ), patch.object(
         presentation_endpoint,
         "get_slide_content_from_type_and_outline",
