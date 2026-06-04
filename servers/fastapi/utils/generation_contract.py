@@ -476,6 +476,33 @@ def _max_items(schema: dict, key: str) -> Optional[int]:
     return value if isinstance(value, int) else None
 
 
+def _relax_min_items(schema: Any, item_count: int) -> None:
+    if not isinstance(schema, dict):
+        return
+    value = schema.get("minItems")
+    if isinstance(value, int) and value > item_count:
+        schema["minItems"] = item_count
+
+
+def _relax_table_schema_min_items(
+    schema: dict,
+    header_key: str,
+    table: ContractTable,
+) -> None:
+    props = schema.get("properties", {})
+    if not isinstance(props, dict):
+        return
+
+    header_schema = props.get(header_key)
+    _relax_min_items(header_schema, table.column_count)
+
+    rows_schema = props.get("rows")
+    _relax_min_items(rows_schema, table.row_count)
+    if isinstance(rows_schema, dict):
+        row_item_schema = rows_schema.get("items")
+        _relax_min_items(row_item_schema, table.column_count)
+
+
 def _get_path(target: dict, path: list[str]) -> Any:
     current: Any = target
     for key in path:
@@ -516,16 +543,12 @@ def _table_payload(table: ContractTable, header_key: str) -> dict[str, Any]:
     }
 
 
-def overlay_contract_tables(
-    slide_content: dict,
-    slide_schema: dict,
+def _tables_for_slide(
     state: GenerationContractState,
     slide_index: int,
-) -> tuple[dict, list[ContractIssue]]:
-    if not state.enabled:
-        return slide_content, []
+) -> list[ContractTable]:
     section = state.sections[slide_index] if slide_index < len(state.sections) else None
-    tables = _dedupe_tables(
+    return _dedupe_tables(
         [
             *(section.tables if section else []),
             *(
@@ -535,6 +558,46 @@ def overlay_contract_tables(
             ),
         ]
     )
+
+
+def schema_with_contract_table_overrides(
+    slide_schema: dict,
+    state: GenerationContractState,
+    slide_index: int,
+) -> dict:
+    schema = copy.deepcopy(slide_schema or {})
+    if not state.enabled:
+        return schema
+
+    tables = _tables_for_slide(state, slide_index)
+    if not tables:
+        return schema
+
+    schema_paths = _schema_table_paths(schema)
+    used_paths: set[tuple[str, ...]] = set()
+    for table in tables:
+        for path, header_key in schema_paths:
+            path_key = tuple(path)
+            if path_key in used_paths:
+                continue
+            table_schema = _schema_at_path(schema, path)
+            if not _table_fits_schema(table, table_schema, header_key):
+                continue
+            _relax_table_schema_min_items(table_schema, header_key, table)
+            used_paths.add(path_key)
+            break
+    return schema
+
+
+def overlay_contract_tables(
+    slide_content: dict,
+    slide_schema: dict,
+    state: GenerationContractState,
+    slide_index: int,
+) -> tuple[dict, list[ContractIssue]]:
+    if not state.enabled:
+        return slide_content, []
+    tables = _tables_for_slide(state, slide_index)
     if not tables:
         return slide_content, []
 

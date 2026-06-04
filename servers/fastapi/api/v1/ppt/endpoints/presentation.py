@@ -78,6 +78,7 @@ from utils.generation_contract import (
     contract_instructions_for_slide,
     enforce_contract_or_raise,
     overlay_contract_tables,
+    schema_with_contract_table_overrides,
     validate_contract_request,
     validate_pptx_contract,
     validate_slide_json_contract,
@@ -915,6 +916,18 @@ async def generate_presentation_handler(
 
         slide_layout_indices = presentation_structure.slides
         slide_layouts = [layout_model.slides[idx] for idx in slide_layout_indices]
+        content_slide_layouts = [
+            slide_layout.model_copy(
+                update={
+                    "json_schema": schema_with_contract_table_overrides(
+                        slide_layout.json_schema,
+                        contract_state,
+                        i,
+                    )
+                }
+            )
+            for i, slide_layout in enumerate(slide_layouts)
+        ]
 
         # Schedule slide content generation and asset fetching in batches of 10
         batch_size = 10
@@ -926,7 +939,7 @@ async def generate_presentation_handler(
             # Generate contents for this batch concurrently
             content_tasks = [
                 get_slide_content_from_type_and_outline(
-                    slide_layouts[i],
+                    content_slide_layouts[i],
                     presentation_outlines.slides[i],
                     language_to_use,
                     request.tone.value,

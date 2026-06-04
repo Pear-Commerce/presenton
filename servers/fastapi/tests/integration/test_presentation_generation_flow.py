@@ -181,7 +181,7 @@ def test_generate_presentation_handler_strict_mode_preserves_markdown_table(fake
                             "type": "object",
                             "properties": {
                                 "headers": {"type": "array", "maxItems": 4},
-                                "rows": {"type": "array", "maxItems": 4},
+                                "rows": {"type": "array", "minItems": 2, "maxItems": 4},
                             },
                         },
                     },
@@ -271,6 +271,114 @@ def test_generate_presentation_handler_strict_mode_preserves_markdown_table(fake
     assert table_slide.content["tableData"]["rows"] == [
         ["Target", "7.1%", "2026-05-16"]
     ]
+    content_layout = get_slide_content.call_args_list[1].args[0]
+    assert (
+        content_layout.json_schema["properties"]["tableData"]["properties"]["rows"][
+            "minItems"
+        ]
+        == 1
+    )
+
+
+def test_generate_presentation_handler_strict_violation_returns_structured_422(
+    fake_async_session,
+):
+    request = GeneratePresentationRequest(
+        content="Create a contract-preserving QBR.",
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Evidence Table",
+                    "",
+                    "| Retailer | Visit Rate | Date |",
+                    "| --- | --- | --- |",
+                    "| Target | 7.1% | 2026-05-16 |",
+                ]
+            )
+        ],
+        language="English",
+        export_as="pdf",
+        template="general",
+        contract_mode="strict",
+        generation_mode="layout_from_contract",
+        content_generation="preserve",
+        generation_contract={"tables_are_evidence": True},
+    )
+    presentation_id = uuid.uuid4()
+    layout = PresentationLayoutModel(
+        name="general",
+        ordered=False,
+        slides=[
+            SlideLayoutModel(
+                id="layout-1",
+                name="Too Narrow Table",
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "tableData": {
+                            "type": "object",
+                            "properties": {
+                                "headers": {"type": "array", "maxItems": 2},
+                                "rows": {"type": "array", "maxItems": 4},
+                            },
+                        },
+                    },
+                },
+            ),
+        ],
+    )
+
+    with patch.object(
+        presentation_endpoint.MEM0_PRESENTATION_MEMORY_SERVICE,
+        "store_generation_context",
+        new=AsyncMock(),
+    ), patch.object(
+        presentation_endpoint.MEM0_PRESENTATION_MEMORY_SERVICE,
+        "store_generated_outlines",
+        new=AsyncMock(),
+    ), patch.object(
+        presentation_endpoint,
+        "get_layout_by_name",
+        new=AsyncMock(return_value=layout),
+    ), patch.object(
+        presentation_endpoint,
+        "generate_presentation_structure",
+        new=AsyncMock(return_value=PresentationStructureModel(slides=[0])),
+    ), patch.object(
+        presentation_endpoint,
+        "get_slide_content_from_type_and_outline",
+        new=AsyncMock(return_value={"title": "Evidence Table"}),
+    ), patch.object(
+        presentation_endpoint,
+        "process_slide_and_fetch_assets",
+        new=AsyncMock(return_value=[]),
+    ), patch.object(
+        presentation_endpoint,
+        "get_images_directory",
+        return_value="/tmp",
+    ), patch.object(
+        presentation_endpoint,
+        "ImageGenerationService",
+        return_value=Mock(),
+    ), patch.object(
+        presentation_endpoint.CONCURRENT_SERVICE,
+        "run_task",
+        new=Mock(),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            _run(
+                presentation_endpoint.generate_presentation_handler(
+                    request=request,
+                    presentation_id=presentation_id,
+                    async_status=None,
+                    sql_session=fake_async_session,
+                )
+            )
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail["reason"] == "generation_contract_violation"
+    assert exc.value.detail["issues"][0]["reason"] == "no_compatible_table_layout"
 
 
 def test_prepare_presentation_preserves_payload_icon_weight():

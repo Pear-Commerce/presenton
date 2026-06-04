@@ -1,10 +1,12 @@
+from typing import Any
+
 from fastapi import HTTPException
 from pydantic import BaseModel
 
 
 class APIErrorModel(BaseModel):
     status_code: int
-    detail: str
+    detail: Any
 
     @classmethod
     def from_exception(cls, e: Exception) -> "APIErrorModel":

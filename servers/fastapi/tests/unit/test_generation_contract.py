@@ -1,15 +1,18 @@
 from fastapi import HTTPException
 
 from models.generate_presentation_request import GeneratePresentationRequest
+from models.api_error_model import APIErrorModel
 from utils.generation_contract import (
     build_generation_contract_state,
     enforce_contract_or_raise,
     overlay_contract_tables,
     parse_markdown_tables,
+    schema_with_contract_table_overrides,
     validate_contract_request,
     validate_slide_json_contract,
     validate_structure,
 )
+from utils.schema_utils import get_schema_validation_errors
 
 
 def strict_request(**overrides):
@@ -134,6 +137,76 @@ def test_contract_tables_overlay_into_compatible_table_schema():
     assert content["tableData"]["rows"] == [["Target", "7.1%", "2026-05-16"]]
 
 
+def test_strict_contract_relaxes_table_minimums_for_exact_evidence():
+    state = build_generation_contract_state(strict_request())
+    schema = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "tableData": {
+                "type": "object",
+                "properties": {
+                    "headers": {"type": "array", "minItems": 4, "maxItems": 4},
+                    "rows": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 4,
+                        "items": {
+                            "type": "array",
+                            "minItems": 4,
+                            "maxItems": 4,
+                            "items": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        },
+    }
+
+    relaxed = schema_with_contract_table_overrides(schema, state, 0)
+    table_schema = relaxed["properties"]["tableData"]["properties"]
+
+    assert schema["properties"]["tableData"]["properties"]["rows"]["minItems"] == 2
+    assert table_schema["headers"]["minItems"] == 3
+    assert table_schema["headers"]["maxItems"] == 4
+    assert table_schema["rows"]["minItems"] == 1
+    assert table_schema["rows"]["maxItems"] == 4
+    assert table_schema["rows"]["items"]["minItems"] == 3
+    assert table_schema["rows"]["items"]["maxItems"] == 4
+    assert get_schema_validation_errors(
+        relaxed,
+        {
+            "title": "Evidence Table",
+            "tableData": {
+                "headers": ["Retailer", "Visit Rate", "Date"],
+                "rows": [["Target", "7.1%", "2026-05-16"]],
+            },
+        },
+    ) == []
+
+
+def test_strict_contract_keeps_table_maximums_as_layout_blockers():
+    state = build_generation_contract_state(strict_request())
+    schema = {
+        "type": "object",
+        "properties": {
+            "tableData": {
+                "type": "object",
+                "properties": {
+                    "headers": {"type": "array", "maxItems": 2},
+                    "rows": {"type": "array", "maxItems": 4},
+                },
+            },
+        },
+    }
+
+    content, issues = overlay_contract_tables({}, schema, state, 0)
+
+    assert content == {}
+    assert issues[0].reason == "no_compatible_table_layout"
+    assert issues[0].expected == {"columns": 3, "rows": 1}
+
+
 def test_strict_contract_detects_forbidden_addition_and_missing_exact_terms():
     state = build_generation_contract_state(strict_request())
     slide_json = [
@@ -166,3 +239,21 @@ def test_strict_contract_fail_policy_raises_structured_diagnostics():
         assert exc.detail["issues"][0]["reason"] == "extra_slide"
     else:
         raise AssertionError("Expected strict contract violation to fail")
+
+
+def test_api_error_model_accepts_structured_http_exception_detail():
+    exc = HTTPException(
+        status_code=422,
+        detail={
+            "reason": "generation_contract_violation",
+            "issues": [{"reason": "changed_table_values"}],
+        },
+    )
+
+    model = APIErrorModel.from_exception(exc)
+
+    assert model.status_code == 422
+    assert model.detail["reason"] == "generation_contract_violation"
+    assert model.model_dump(mode="json")["detail"]["issues"][0]["reason"] == (
+        "changed_table_values"
+    )
