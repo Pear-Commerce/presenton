@@ -76,8 +76,10 @@ from utils.get_layout_by_name import get_layout_by_name
 from utils.generation_contract import (
     build_generation_contract_state,
     contract_table_issues_for_schema,
+    contract_text_issues_for_schema,
     contract_instructions_for_slide,
     enforce_contract_or_raise,
+    overlay_contract_text,
     overlay_contract_tables,
     schema_with_contract_table_overrides,
     validate_contract_request,
@@ -918,21 +920,35 @@ async def generate_presentation_handler(
         slide_layout_indices = presentation_structure.slides
         for i, layout_index in enumerate(list(slide_layout_indices)):
             selected_layout = layout_model.slides[layout_index]
-            table_issues = contract_table_issues_for_schema(
-                selected_layout.json_schema,
-                contract_state,
-                i,
-            )
-            if not table_issues:
+            contract_issues = [
+                *contract_table_issues_for_schema(
+                    selected_layout.json_schema,
+                    contract_state,
+                    i,
+                ),
+                *contract_text_issues_for_schema(
+                    selected_layout.json_schema,
+                    contract_state,
+                    i,
+                ),
+            ]
+            if not contract_issues:
                 continue
 
             replacement_index = None
             for candidate_index, candidate_layout in enumerate(layout_model.slides):
-                candidate_issues = contract_table_issues_for_schema(
-                    candidate_layout.json_schema,
-                    contract_state,
-                    i,
-                )
+                candidate_issues = [
+                    *contract_table_issues_for_schema(
+                        candidate_layout.json_schema,
+                        contract_state,
+                        i,
+                    ),
+                    *contract_text_issues_for_schema(
+                        candidate_layout.json_schema,
+                        contract_state,
+                        i,
+                    ),
+                ]
                 if not candidate_issues:
                     replacement_index = candidate_index
                     break
@@ -940,7 +956,7 @@ async def generate_presentation_handler(
             if replacement_index is None:
                 enforce_contract_or_raise(
                     contract_state,
-                    table_issues,
+                    contract_issues,
                     stage="slide_content",
                 )
             else:
@@ -993,9 +1009,15 @@ async def generate_presentation_handler(
                     contract_state,
                     i,
                 )
+                slide_content, text_issues = overlay_contract_text(
+                    slide_content,
+                    slide_layout.json_schema,
+                    contract_state,
+                    i,
+                )
                 enforce_contract_or_raise(
                     contract_state,
-                    table_issues,
+                    [*table_issues, *text_issues],
                     stage="slide_content",
                 )
                 slide = SlideModel(

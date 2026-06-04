@@ -194,7 +194,8 @@ def test_generate_presentation_handler_strict_mode_preserves_markdown_table(fake
         side_effect=[
             {
                 "title": "Executive Answer",
-                "body": "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
+                "body": "Target had the strongest non-Walmart retailer visit rate in mid-May.",
+                "__speaker_note__": "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
             },
             {
                 "title": "Evidence Table",
@@ -262,6 +263,10 @@ def test_generate_presentation_handler_strict_mode_preserves_markdown_table(fake
         )
 
     assert response.path.endswith(".pdf")
+    summary_slide = fake_async_session.added_all[0]
+    assert summary_slide.content["body"] == (
+        "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16."
+    )
     table_slide = fake_async_session.added_all[1]
     assert table_slide.layout == "layout-2"
     assert table_slide.content["tableData"]["headers"] == [

@@ -5,13 +5,16 @@ from models.api_error_model import APIErrorModel
 from utils.generation_contract import (
     build_generation_contract_state,
     contract_table_issues_for_schema,
+    contract_text_issues_for_schema,
     enforce_contract_or_raise,
+    overlay_contract_text,
     overlay_contract_tables,
     parse_markdown_tables,
     schema_with_contract_table_overrides,
     validate_contract_request,
     validate_slide_json_contract,
     validate_structure,
+    visible_text_from_json,
 )
 from utils.schema_utils import get_schema_validation_errors
 
@@ -198,6 +201,90 @@ def test_contract_tables_overlay_into_compatible_table_schema():
     assert issues == []
     assert content["tableData"]["headers"] == ["Retailer", "Visit Rate", "Date"]
     assert content["tableData"]["rows"] == [["Target", "7.1%", "2026-05-16"]]
+
+
+def test_contract_text_overlay_replaces_paraphrased_visible_body():
+    state = build_generation_contract_state(strict_request())
+    schema = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "maxLength": 40},
+            "body": {"type": "string", "maxLength": 200},
+            "__speaker_note__": {"type": "string", "maxLength": 500},
+        },
+    }
+    generated = {
+        "title": "Executive Answer",
+        "body": "Target had the leading non-Walmart rate in mid-May.",
+        "__speaker_note__": "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
+    }
+
+    content, issues = overlay_contract_text(generated, schema, state, 0)
+
+    assert issues == []
+    assert (
+        content["body"]
+        == "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16."
+    )
+    assert "2026-05-16" in visible_text_from_json(content)
+
+
+def test_contract_text_overlay_does_not_use_hidden_or_media_fields():
+    state = build_generation_contract_state(strict_request())
+    schema = {
+        "type": "object",
+        "properties": {
+            "__speaker_note__": {"type": "string", "maxLength": 500},
+            "image": {
+                "type": "object",
+                "properties": {
+                    "__image_prompt__": {"type": "string", "maxLength": 500},
+                },
+            },
+        },
+    }
+
+    content, issues = overlay_contract_text({}, schema, state, 0)
+
+    assert content == {}
+    assert issues[0].reason == "no_compatible_locked_text_layout"
+
+
+def test_contract_text_overlay_rejects_too_short_layout_field():
+    state = build_generation_contract_state(strict_request())
+    schema = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "maxLength": 20},
+        },
+    }
+
+    assert contract_text_issues_for_schema(schema, state, 0)[0].reason == (
+        "no_compatible_locked_text_layout"
+    )
+
+
+def test_validate_slide_json_contract_requires_visible_locked_text():
+    state = build_generation_contract_state(strict_request())
+    slide_json = [
+        {
+            "title": "Executive Answer",
+            "__speaker_note__": "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
+            "image": {
+                "__image_prompt__": "Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
+            },
+            "tableData": {
+                "headers": ["Retailer", "Visit Rate", "Date"],
+                "rows": [["Target", "7.1%", "2026-05-16"]],
+            },
+        }
+    ]
+
+    reasons = {issue.reason for issue in validate_slide_json_contract(state, slide_json)}
+
+    assert "missing_locked_text" in reasons
+    assert "changed_metric_date_or_label" not in reasons
+    assert "changed_table_values" not in reasons
 
 
 def test_strict_contract_relaxes_table_minimums_for_exact_evidence():

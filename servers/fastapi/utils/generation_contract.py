@@ -66,6 +66,14 @@ class ContractTable:
 
 
 @dataclass
+class ContractTextBlock:
+    text: str
+    slide_index: Optional[int] = None
+    section_title: Optional[str] = None
+    source: str = "locked_text"
+
+
+@dataclass
 class ContractSection:
     index: int
     title: str
@@ -265,6 +273,15 @@ def _table_signature(table: ContractTable) -> tuple[Any, ...]:
     )
 
 
+def _text_signature(block: ContractTextBlock) -> tuple[Any, ...]:
+    location = (
+        block.slide_index
+        if block.slide_index is not None
+        else _norm(block.section_title)
+    )
+    return location, _norm(block.text)
+
+
 def _dedupe_tables(tables: Iterable[ContractTable]) -> list[ContractTable]:
     seen: set[tuple[Any, ...]] = set()
     result = []
@@ -274,6 +291,18 @@ def _dedupe_tables(tables: Iterable[ContractTable]) -> list[ContractTable]:
             continue
         seen.add(signature)
         result.append(table)
+    return result
+
+
+def _dedupe_text_blocks(blocks: Iterable[ContractTextBlock]) -> list[ContractTextBlock]:
+    seen: set[tuple[Any, ...]] = set()
+    result = []
+    for block in blocks:
+        signature = _text_signature(block)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        result.append(block)
     return result
 
 
@@ -450,6 +479,122 @@ def contract_instructions_for_slide(
     return "\n".join(lines)
 
 
+TEXT_FIELD_KEY_PRIORITY = (
+    ("body", "description", "paragraph", "content", "summary", "narrative", "details", "insight"),
+    ("subtitle", "caption", "note", "copy"),
+    ("title", "heading", "headline"),
+)
+TEXT_FIELD_EXCLUDED_KEYS = {
+    "__speaker_note__",
+    "__image_prompt__",
+    "__image_url__",
+    "__icon_query__",
+    "__icon_url__",
+    "headers",
+    "columns",
+    "rows",
+    "label",
+    "labels",
+    "value",
+    "values",
+    "metric",
+    "metrics",
+}
+TEXT_FIELD_EXCLUDED_PATH_PARTS = {
+    "table",
+    "tabledata",
+    "chart",
+    "chartdata",
+    "image",
+    "icon",
+    "logo",
+    "palette",
+    "series",
+    "axis",
+    "data",
+}
+VISIBLE_JSON_TEXT_EXCLUDED_KEYS = {
+    "__speaker_note__",
+    "__image_prompt__",
+    "__image_url__",
+    "__icon_query__",
+    "__icon_url__",
+}
+VISIBLE_JSON_TEXT_EXCLUDED_PATH_PARTS = {
+    "image",
+    "icon",
+    "logo",
+}
+
+
+def _key_priority(key: str) -> Optional[int]:
+    normalized = re.sub(r"[^a-z0-9]+", "", key.lower())
+    if normalized in TEXT_FIELD_EXCLUDED_KEYS:
+        return None
+    for priority, names in enumerate(TEXT_FIELD_KEY_PRIORITY):
+        if any(name in normalized for name in names):
+            return priority
+    return 5
+
+
+def _path_allows_visible_text(path: list[str]) -> bool:
+    for part in path:
+        normalized = re.sub(r"[^a-z0-9_]+", "", part.lower())
+        if normalized in TEXT_FIELD_EXCLUDED_KEYS:
+            return False
+        if normalized.startswith("__"):
+            return False
+        if any(excluded in normalized for excluded in TEXT_FIELD_EXCLUDED_PATH_PARTS):
+            return False
+    return True
+
+
+def _path_allows_visible_json_text(path: list[str]) -> bool:
+    for part in path:
+        normalized = re.sub(r"[^a-z0-9_]+", "", part.lower())
+        if normalized in VISIBLE_JSON_TEXT_EXCLUDED_KEYS:
+            return False
+        if normalized.startswith("__"):
+            return False
+        if any(excluded in normalized for excluded in VISIBLE_JSON_TEXT_EXCLUDED_PATH_PARTS):
+            return False
+    return True
+
+
+def _is_string_schema(schema: Any) -> bool:
+    if not isinstance(schema, dict):
+        return False
+    schema_type = schema.get("type")
+    return schema_type == "string" or "maxLength" in schema or "minLength" in schema
+
+
+def _max_length(schema: dict) -> Optional[int]:
+    value = schema.get("maxLength") if isinstance(schema, dict) else None
+    return value if isinstance(value, int) else None
+
+
+def _schema_text_paths(
+    schema: Any,
+    path: Optional[list[str]] = None,
+) -> list[tuple[list[str], int]]:
+    path = path or []
+    if not isinstance(schema, dict):
+        return []
+
+    props = schema.get("properties")
+    paths: list[tuple[list[str], int]] = []
+    if isinstance(props, dict):
+        for key, child in props.items():
+            child_path = [*path, key]
+            if not _path_allows_visible_text(child_path):
+                continue
+            priority = _key_priority(key)
+            if priority is not None and _is_string_schema(child):
+                paths.append((child_path, priority))
+            paths.extend(_schema_text_paths(child, child_path))
+    return sorted(paths, key=lambda item: (item[1], len(item[0]), ".".join(item[0])))
+
+
 def _schema_table_paths(schema: Any, path: Optional[list[str]] = None) -> list[tuple[list[str], str]]:
     path = path or []
     if not isinstance(schema, dict):
@@ -564,6 +709,40 @@ def _tables_for_slide(
     )
 
 
+def _text_blocks_for_slide(
+    state: GenerationContractState,
+    slide_index: int,
+) -> list[ContractTextBlock]:
+    section = state.sections[slide_index] if slide_index < len(state.sections) else None
+    if not section:
+        return []
+    blocks = []
+    section_text = section.markdown
+    normalized_section_text = _norm(section_text)
+    for locked in state.locked_text:
+        if locked in section_text or _norm(locked) in normalized_section_text:
+            blocks.append(
+                ContractTextBlock(
+                    text=locked,
+                    slide_index=slide_index + 1,
+                    section_title=section.title,
+                )
+            )
+    return _dedupe_text_blocks(blocks)
+
+
+def _combined_locked_text_for_slide(
+    state: GenerationContractState,
+    slide_index: int,
+) -> str:
+    return "\n".join(block.text for block in _text_blocks_for_slide(state, slide_index))
+
+
+def _text_fits_schema(text: str, schema: dict) -> bool:
+    max_length = _max_length(schema)
+    return max_length is None or len(text) <= max_length
+
+
 def schema_with_contract_table_overrides(
     slide_schema: dict,
     state: GenerationContractState,
@@ -600,6 +779,28 @@ def contract_table_issues_for_schema(
 ) -> list[ContractIssue]:
     _, issues = overlay_contract_tables({}, slide_schema, state, slide_index)
     return issues
+
+
+def contract_text_issues_for_schema(
+    slide_schema: dict,
+    state: GenerationContractState,
+    slide_index: int,
+) -> list[ContractIssue]:
+    text = _combined_locked_text_for_slide(state, slide_index)
+    if not state.enabled or not text:
+        return []
+    for path, _ in _schema_text_paths(slide_schema):
+        if _text_fits_schema(text, _schema_at_path(slide_schema, path)):
+            return []
+    return [
+        ContractIssue(
+            reason="no_compatible_locked_text_layout",
+            message="Selected layout cannot preserve the required locked text in a visible text field.",
+            stage="slide_content",
+            section_index=slide_index + 1,
+            expected=text,
+        )
+    ]
 
 
 def overlay_contract_tables(
@@ -651,19 +852,55 @@ def overlay_contract_tables(
     return content, issues
 
 
-def _walk_strings(value: Any) -> Iterable[str]:
+def overlay_contract_text(
+    slide_content: dict,
+    slide_schema: dict,
+    state: GenerationContractState,
+    slide_index: int,
+) -> tuple[dict, list[ContractIssue]]:
+    if not state.enabled:
+        return slide_content, []
+    text = _combined_locked_text_for_slide(state, slide_index)
+    if not text:
+        return slide_content, []
+    if text in visible_text_from_json(slide_content):
+        return slide_content, []
+
+    for path, _ in _schema_text_paths(slide_schema):
+        if not _text_fits_schema(text, _schema_at_path(slide_schema, path)):
+            continue
+        content = copy.deepcopy(slide_content)
+        _set_path(content, path, text)
+        return content, []
+
+    return slide_content, [
+        ContractIssue(
+            reason="no_compatible_locked_text_layout",
+            message="Selected layout cannot preserve the required locked text in a visible text field.",
+            stage="slide_content",
+            section_index=slide_index + 1,
+            expected=text,
+        )
+    ]
+
+
+def _walk_visible_strings(value: Any, path: Optional[list[str]] = None) -> Iterable[str]:
+    path = path or []
     if isinstance(value, str):
         yield value
     elif isinstance(value, dict):
-        for child in value.values():
-            yield from _walk_strings(child)
+        for key, child in value.items():
+            child_path = [*path, str(key)]
+            if not _path_allows_visible_json_text(child_path):
+                continue
+            yield from _walk_visible_strings(child, child_path)
     elif isinstance(value, list):
         for child in value:
-            yield from _walk_strings(child)
+            yield from _walk_visible_strings(child, path)
 
 
 def visible_text_from_json(value: Any) -> str:
-    return "\n".join(_walk_strings(value))
+    return "\n".join(_walk_visible_strings(value))
 
 
 def _table_values_from_json(value: Any) -> list[ContractTable]:
