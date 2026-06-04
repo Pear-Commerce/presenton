@@ -1,21 +1,26 @@
 import asyncio
 from datetime import datetime
+import hashlib
 import json
 import logging
 import os
 import random
 import traceback
-from typing import Annotated, List, Literal, Optional, Tuple
+from typing import Annotated, Any, List, Literal, Optional, Tuple
 import dirtyjson
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from constants.presentation import DEFAULT_TEMPLATES, MAX_NUMBER_OF_SLIDES
 from enums.webhook_event import WebhookEvent
 from models.api_error_model import APIErrorModel
-from models.generate_presentation_request import GeneratePresentationRequest
+from models.generate_presentation_request import (
+    GeneratePresentationRequest,
+    GenerationContract,
+)
 from models.presentation_and_path import PresentationPathAndEditPath
 from models.presentation_from_template import EditPresentationRequest
 from models.presentation_outline_model import (
@@ -76,8 +81,10 @@ from utils.get_layout_by_name import get_layout_by_name
 from utils.generation_contract import (
     build_preserved_slide_content,
     build_generation_contract_state,
+    ContractIssue,
     contract_layout_issues_for_schema,
     contract_instructions_for_slide,
+    diagnostic_payload,
     enforce_contract_or_raise,
     overlay_contract_text,
     overlay_contract_tables,
@@ -100,6 +107,183 @@ logger = logging.getLogger(__name__)
 
 
 PRESENTATION_ROUTER = APIRouter(prefix="/presentation", tags=["Presentation"])
+
+
+class StrictLayoutPreflightRequest(BaseModel):
+    template: str = Field(default="general")
+    slides_markdown: List[str] = Field(default_factory=list)
+    contract_mode: Literal["off", "strict"] = Field(default="strict")
+    generation_mode: Literal["standard", "layout_from_contract"] = Field(
+        default="layout_from_contract"
+    )
+    content_generation: Literal["generate", "preserve"] = Field(default="preserve")
+    generation_contract: Optional[GenerationContract] = Field(default=None)
+    preferred_layout_ids: Optional[List[List[str]]] = Field(default=None)
+    pinned_layout_ids: Optional[List[str]] = Field(default=None)
+
+
+class StrictLayoutPreflightSlide(BaseModel):
+    slide_index: int
+    section_index: int
+    selected_layout_id: str
+    selected_layout_index: int
+    selected_layout_name: Optional[str] = None
+    compatible_layout_ids: List[str] = Field(default_factory=list)
+    content_preview: dict[str, Any] = Field(default_factory=dict)
+
+
+class StrictLayoutPreflightResponse(BaseModel):
+    status: Literal["pass", "fail"]
+    reason: Optional[str] = None
+    template: str
+    layout_catalog_hash: str
+    pinned_layout_ids: List[str] = Field(default_factory=list)
+    slides: List[StrictLayoutPreflightSlide] = Field(default_factory=list)
+    issues: List[dict[str, Any]] = Field(default_factory=list)
+
+
+def _layout_catalog_hash(layout: PresentationLayoutModel) -> str:
+    payload = [
+        {
+            "id": slide.id,
+            "json_schema": slide.json_schema,
+        }
+        for slide in layout.slides
+    ]
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _layout_id_index_maps(
+    layout: PresentationLayoutModel,
+) -> tuple[dict[str, int], dict[str, int]]:
+    exact: dict[str, int] = {}
+    aliases: dict[str, int] = {}
+    ambiguous_aliases: set[str] = set()
+
+    for index, slide in enumerate(layout.slides):
+        if slide.id:
+            exact[slide.id] = index
+            alias = slide.id.rsplit(":", 1)[-1]
+            if alias in aliases and aliases[alias] != index:
+                ambiguous_aliases.add(alias)
+            else:
+                aliases[alias] = index
+
+    for alias in ambiguous_aliases:
+        aliases.pop(alias, None)
+    return exact, aliases
+
+
+def _layout_index_for_id(
+    layout: PresentationLayoutModel,
+    layout_id: str,
+) -> Optional[int]:
+    requested = str(layout_id or "").strip()
+    if not requested:
+        return None
+
+    exact, aliases = _layout_id_index_maps(layout)
+    if requested in exact:
+        return exact[requested]
+    return aliases.get(requested)
+
+
+def _resolve_slide_layout_ids(
+    layout: PresentationLayoutModel,
+    slide_layout_ids: list[str],
+    slide_count: int,
+) -> tuple[list[int], list[ContractIssue]]:
+    issues: list[ContractIssue] = []
+    if len(slide_layout_ids) != slide_count:
+        issues.append(
+            ContractIssue(
+                reason="pinned_layout_count_mismatch",
+                message="Pinned slide layout ids must match the slide/section count.",
+                stage="structure",
+                expected=slide_count,
+                actual=len(slide_layout_ids),
+                details={
+                    "issue_code": "STRICT_LAYOUT_PIN_COUNT_MISMATCH",
+                    "expected_count": slide_count,
+                    "actual_count": len(slide_layout_ids),
+                },
+            )
+        )
+        return [], issues
+
+    indexes: list[int] = []
+    for slide_index, layout_id in enumerate(slide_layout_ids):
+        layout_index = _layout_index_for_id(layout, layout_id)
+        if layout_index is None:
+            issues.append(
+                ContractIssue(
+                    reason="unknown_pinned_layout_id",
+                    message="Pinned slide layout id was not found in the selected template.",
+                    stage="structure",
+                    section_index=slide_index + 1,
+                    expected=layout_id,
+                    details={
+                        "issue_code": "STRICT_LAYOUT_PIN_UNKNOWN",
+                        "slide_index": slide_index,
+                        "section_index": slide_index + 1,
+                        "layout_id": layout_id,
+                    },
+                )
+            )
+            continue
+        indexes.append(layout_index)
+    if issues:
+        return [], issues
+    return indexes, []
+
+
+def _contract_issue_dicts(issues: list[ContractIssue]) -> list[dict[str, Any]]:
+    return [issue.to_dict() for issue in issues]
+
+
+def _ordered_preflight_candidate_indexes(
+    layout: PresentationLayoutModel,
+    request: StrictLayoutPreflightRequest,
+    slide_index: int,
+) -> list[int]:
+    seen: set[int] = set()
+    indexes: list[int] = []
+
+    preferred_ids = []
+    if request.preferred_layout_ids and slide_index < len(request.preferred_layout_ids):
+        preferred_ids = request.preferred_layout_ids[slide_index] or []
+
+    for layout_id in preferred_ids:
+        layout_index = _layout_index_for_id(layout, layout_id)
+        if layout_index is None or layout_index in seen:
+            continue
+        seen.add(layout_index)
+        indexes.append(layout_index)
+
+    for layout_index in range(len(layout.slides)):
+        if layout_index in seen:
+            continue
+        indexes.append(layout_index)
+    return indexes
+
+
+def _compatible_layout_ids(
+    layout: PresentationLayoutModel,
+    contract_state,
+    slide_index: int,
+) -> list[str]:
+    compatible = []
+    for candidate_layout in layout.slides:
+        issues = contract_layout_issues_for_schema(
+            candidate_layout.json_schema,
+            contract_state,
+            slide_index,
+            preserve_markdown=True,
+        )
+        if not issues:
+            compatible.append(candidate_layout.id)
+    return compatible
 
 
 def _extract_custom_template_id(layout_name: Optional[str]) -> Optional[uuid.UUID]:
@@ -181,6 +365,140 @@ def _build_export_cookie_header(request: Request) -> Optional[str]:
             )
 
     return None
+
+
+@PRESENTATION_ROUTER.post(
+    "/strict-layout-preflight", response_model=StrictLayoutPreflightResponse
+)
+async def strict_layout_preflight(
+    request: StrictLayoutPreflightRequest,
+) -> StrictLayoutPreflightResponse:
+    layout_model = await get_layout_by_name(request.template)
+    layout_catalog_hash = _layout_catalog_hash(layout_model)
+    contract_state = build_generation_contract_state(request)
+    slide_count = len(contract_state.slides_markdown)
+
+    request_issues = [
+        *validate_contract_request(contract_state),
+        *validate_structure(contract_state, slide_count, stage="request"),
+    ]
+    pinned_indexes: Optional[list[int]] = None
+    if request.pinned_layout_ids is not None:
+        pinned_indexes, pinned_issues = _resolve_slide_layout_ids(
+            layout_model,
+            request.pinned_layout_ids,
+            slide_count,
+        )
+        request_issues.extend(pinned_issues)
+
+    if request_issues:
+        return StrictLayoutPreflightResponse(
+            status="fail",
+            reason="strict_layout_preflight_failed",
+            template=request.template,
+            layout_catalog_hash=layout_catalog_hash,
+            issues=_contract_issue_dicts(request_issues),
+        )
+
+    response_slides: list[StrictLayoutPreflightSlide] = []
+    pinned_layout_ids: list[str] = []
+    failure_issues: list[ContractIssue] = []
+
+    for slide_index in range(slide_count):
+        candidate_indexes = (
+            [pinned_indexes[slide_index]]
+            if pinned_indexes is not None
+            else _ordered_preflight_candidate_indexes(
+                layout_model,
+                request,
+                slide_index,
+            )
+        )
+        compatible_ids = _compatible_layout_ids(layout_model, contract_state, slide_index)
+        selected_index: Optional[int] = None
+        first_candidate_issues: list[ContractIssue] = []
+
+        for candidate_index in candidate_indexes:
+            candidate_layout = layout_model.slides[candidate_index]
+            candidate_issues = contract_layout_issues_for_schema(
+                candidate_layout.json_schema,
+                contract_state,
+                slide_index,
+                preserve_markdown=True,
+            )
+            if candidate_issues and not first_candidate_issues:
+                first_candidate_issues = candidate_issues
+            if not candidate_issues:
+                selected_index = candidate_index
+                break
+
+        if selected_index is None:
+            if first_candidate_issues:
+                failure_issues.extend(first_candidate_issues)
+            else:
+                failure_issues.append(
+                    ContractIssue(
+                        reason="no_layout_candidates",
+                        message="No slide layout candidates were available for strict layout preflight.",
+                        stage="slide_content",
+                        section_index=slide_index + 1,
+                        details={
+                            "issue_code": "STRICT_LAYOUT_PREFLIGHT_NO_CANDIDATES",
+                            "slide_index": slide_index,
+                            "section_index": slide_index + 1,
+                        },
+                    )
+                )
+            continue
+
+        selected_layout = layout_model.slides[selected_index]
+        content_schema = schema_with_contract_table_overrides(
+            selected_layout.json_schema,
+            contract_state,
+            slide_index,
+        )
+        content_preview, content_issues = build_preserved_slide_content(
+            content_schema,
+            contract_state,
+            slide_index,
+        )
+        if content_issues:
+            failure_issues.extend(content_issues)
+            continue
+
+        pinned_layout_ids.append(selected_layout.id)
+        response_slides.append(
+            StrictLayoutPreflightSlide(
+                slide_index=slide_index,
+                section_index=slide_index + 1,
+                selected_layout_id=selected_layout.id,
+                selected_layout_index=selected_index,
+                selected_layout_name=selected_layout.name,
+                compatible_layout_ids=compatible_ids,
+                content_preview=content_preview,
+            )
+        )
+
+    if failure_issues:
+        return StrictLayoutPreflightResponse(
+            status="fail",
+            reason="strict_layout_preflight_failed",
+            template=request.template,
+            layout_catalog_hash=layout_catalog_hash,
+            pinned_layout_ids=pinned_layout_ids,
+            slides=response_slides,
+            issues=_contract_issue_dicts(failure_issues),
+        )
+
+    return StrictLayoutPreflightResponse(
+        status="pass",
+        reason=None,
+        template=request.template,
+        layout_catalog_hash=layout_catalog_hash,
+        pinned_layout_ids=pinned_layout_ids,
+        slides=response_slides,
+        issues=[],
+    )
 
 
 @PRESENTATION_ROUTER.get("/all", response_model=List[PresentationWithSlides])
@@ -828,9 +1146,28 @@ async def generate_presentation_handler(
             layout_model.icon_weight,
         )
         total_slide_layouts = len(layout_model.slides)
+        pinned_slide_layout_indices = None
+        if request.slide_layout_ids is not None:
+            pinned_slide_layout_indices, pinned_layout_issues = _resolve_slide_layout_ids(
+                layout_model,
+                request.slide_layout_ids,
+                total_outlines,
+            )
+            if pinned_layout_issues:
+                raise HTTPException(
+                    status_code=422,
+                    detail=diagnostic_payload(
+                        pinned_layout_issues,
+                        stage="structure",
+                    ),
+                )
 
         # Generate Structure
-        if layout_model.ordered:
+        if pinned_slide_layout_indices is not None:
+            presentation_structure = PresentationStructureModel(
+                slides=pinned_slide_layout_indices
+            )
+        elif layout_model.ordered:
             presentation_structure = layout_model.to_presentation_structure()
         else:
             presentation_structure: PresentationStructureModel = (
@@ -928,6 +1265,14 @@ async def generate_presentation_handler(
                 preserve_markdown=preserve_markdown_layout,
             )
             if not contract_issues:
+                continue
+
+            if pinned_slide_layout_indices is not None:
+                enforce_contract_or_raise(
+                    contract_state,
+                    contract_issues,
+                    stage="slide_content",
+                )
                 continue
 
             replacement_index = None

@@ -74,6 +74,10 @@ class GeneratePresentationRequest(BaseModel):
     slides_markdown: Optional[List[str]] = Field(
         default=None, description="The markdown for the slides"
     )
+    slide_layout_ids: Optional[List[str]] = Field(
+        default=None,
+        description="Optional pinned slide layout ids, one per slide/section",
+    )
     instructions: Optional[str] = Field(
         default=None, description="The instruction for generating the presentation"
     )
