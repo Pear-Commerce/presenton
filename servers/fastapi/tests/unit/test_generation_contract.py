@@ -4,6 +4,7 @@ from models.generate_presentation_request import GeneratePresentationRequest
 from models.api_error_model import APIErrorModel
 from utils.generation_contract import (
     build_generation_contract_state,
+    contract_table_issues_for_schema,
     enforce_contract_or_raise,
     overlay_contract_tables,
     parse_markdown_tables,
@@ -55,6 +56,68 @@ def test_strict_contract_request_accepts_new_api_fields():
     assert len(state.sections) == 1
     assert state.sections[0].title == "Executive Answer"
     assert state.evidence_tables[0].headers == ["Retailer", "Visit Rate", "Date"]
+
+
+def test_strict_contract_dedupes_same_slide_table_from_contract_and_markdown():
+    request = strict_request(
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Executive Answer",
+                    "",
+                    "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
+                ]
+            ),
+            "\n".join(
+                [
+                    "### 2. Evidence Table",
+                    "",
+                    "| Retailer | Visit Rate | Date |",
+                    "| --- | --- | --- |",
+                    "| Target | 7.1% | 2026-05-16 |",
+                ]
+            ),
+        ],
+        generation_contract={
+            "locked_text": [
+                "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16."
+            ],
+            "evidence_tables": [
+                {
+                    "slide_index": 2,
+                    "headers": ["Retailer", "Visit Rate", "Date"],
+                    "rows": [["Target", "7.1%", "2026-05-16"]],
+                }
+            ],
+            "tables_are_evidence": True,
+        },
+    )
+    state = build_generation_contract_state(request)
+    schema = {
+        "type": "object",
+        "properties": {
+            "tableData": {
+                "type": "object",
+                "properties": {
+                    "headers": {"type": "array", "maxItems": 5},
+                    "rows": {"type": "array", "maxItems": 6},
+                },
+            },
+        },
+    }
+
+    assert [
+        (table.slide_index, table.section_title, table.headers, table.rows)
+        for table in state.evidence_tables
+    ] == [
+        (
+            2,
+            None,
+            ["Retailer", "Visit Rate", "Date"],
+            [["Target", "7.1%", "2026-05-16"]],
+        )
+    ]
+    assert contract_table_issues_for_schema(schema, state, 1) == []
 
 
 def test_strict_contract_rejects_missing_locked_source_text():

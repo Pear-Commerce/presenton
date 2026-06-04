@@ -253,9 +253,13 @@ def _table_from_contract(value: Any) -> Optional[ContractTable]:
 
 
 def _table_signature(table: ContractTable) -> tuple[Any, ...]:
+    location = (
+        table.slide_index
+        if table.slide_index is not None
+        else _norm(table.section_title)
+    )
     return (
-        table.slide_index,
-        _norm(table.section_title),
+        location,
         tuple(_norm(cell) for cell in table.headers),
         tuple(tuple(_norm(cell) for cell in row) for row in table.rows),
     )
