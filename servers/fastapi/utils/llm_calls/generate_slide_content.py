@@ -42,6 +42,8 @@ You need to generate structured content json based on the schema.
 
 {user_instructions}
 
+{contract_instructions}
+
 {tone_instructions}
 
 {verbosity_instructions}
@@ -92,6 +94,7 @@ def get_system_prompt(
     verbosity: Optional[str] = None,
     instructions: Optional[str] = None,
     response_schema: Optional[dict] = None,
+    contract_instructions: Optional[str] = None,
 ):
     markdown_emphasis_rules = (
         "- Strictly use markdown to emphasize important points, by bolding or "
@@ -99,6 +102,11 @@ def get_system_prompt(
     )
 
     user_instructions = f"# User Instructions:\n{instructions}" if instructions else ""
+    contract_block = (
+        f"# Contract Instructions:\n{contract_instructions}"
+        if contract_instructions
+        else ""
+    )
     tone_instructions = (
         f"# Tone Instructions:\nMake slide as {tone} as possible." if tone else ""
     )
@@ -120,6 +128,7 @@ def get_system_prompt(
     return SLIDE_CONTENT_SYSTEM_PROMPT.format(
         markdown_emphasis_rules=markdown_emphasis_rules,
         user_instructions=user_instructions,
+        contract_instructions=contract_block,
         tone_instructions=tone_instructions,
         verbosity_instructions=verbosity_instructions,
         output_fields_instructions=output_fields_instructions,
@@ -141,6 +150,7 @@ def get_messages(
     verbosity: Optional[str] = None,
     instructions: Optional[str] = None,
     response_schema: Optional[dict] = None,
+    contract_instructions: Optional[str] = None,
 ) -> list[Message]:
 
     return [
@@ -150,6 +160,7 @@ def get_messages(
                 verbosity,
                 instructions,
                 response_schema,
+                contract_instructions,
             ),
         ),
         UserMessage(
@@ -165,6 +176,7 @@ async def get_slide_content_from_type_and_outline(
     tone: Optional[str] = None,
     verbosity: Optional[str] = None,
     instructions: Optional[str] = None,
+    contract_instructions: Optional[str] = None,
 ):
     client = get_client(config=get_llm_config())
     model = get_model()
@@ -199,6 +211,7 @@ async def get_slide_content_from_type_and_outline(
             verbosity,
             instructions,
             response_schema,
+            contract_instructions,
         )
 
         return await generate_structured_with_schema_retries(

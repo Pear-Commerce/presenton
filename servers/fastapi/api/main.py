@@ -86,6 +86,16 @@ app.add_middleware(UserConfigEnvUpdateMiddleware)
 app.add_middleware(SessionAuthMiddleware)
 
 
+@app.get("/api/v1/version")
+async def get_version():
+    return {
+        "app": "presenton",
+        "source": os.getenv("PRESENTON_SOURCE_REPO", "unknown"),
+        "build_sha": os.getenv("PRESENTON_BUILD_SHA", ""),
+        "build_ref": os.getenv("PRESENTON_BUILD_REF", ""),
+    }
+
+
 @app.middleware("http")
 async def static_icon_fallback_middleware(request: Request, call_next):
     """Serve placeholder when icon paths are missing (e.g. renamed Phosphor icons)."""

@@ -73,6 +73,16 @@ from utils.process_slides import (
     process_slide_and_fetch_assets,
 )
 from utils.get_layout_by_name import get_layout_by_name
+from utils.generation_contract import (
+    build_generation_contract_state,
+    contract_instructions_for_slide,
+    enforce_contract_or_raise,
+    overlay_contract_tables,
+    validate_contract_request,
+    validate_pptx_contract,
+    validate_slide_json_contract,
+    validate_structure,
+)
 from utils.llm_utils import message_content_to_text
 from utils.simple_auth import (
     SESSION_COOKIE_NAME,
@@ -636,6 +646,18 @@ async def generate_presentation_handler(
         using_slides_markdown = False
         language_to_use = (request.language or "").strip() or None
         additional_context = ""
+        contract_state = build_generation_contract_state(request)
+        if contract_state.enabled and contract_state.slides_markdown:
+            request.slides_markdown = contract_state.slides_markdown
+            request.n_slides = len(contract_state.slides_markdown)
+            request.include_table_of_contents = False
+            request.include_title_slide = False
+
+        enforce_contract_or_raise(
+            contract_state,
+            validate_contract_request(contract_state),
+            stage="request",
+        )
 
         if request.slides_markdown:
             using_slides_markdown = True
@@ -778,6 +800,15 @@ async def generate_presentation_handler(
 
         print("-" * 40)
         print(f"Generated {total_outlines} outlines for the presentation")
+        enforce_contract_or_raise(
+            contract_state,
+            validate_structure(
+                contract_state,
+                total_outlines,
+                stage="outlines",
+            ),
+            stage="outlines",
+        )
 
         logger.info(
             "[presentation.generate] loading layout template=%r presentation_id=%s",
@@ -815,6 +846,15 @@ async def generate_presentation_handler(
                 continue
             if presentation_structure.slides[index] >= total_slide_layouts:
                 presentation_structure.slides[index] = random_slide_index
+        enforce_contract_or_raise(
+            contract_state,
+            validate_structure(
+                contract_state,
+                len(presentation_structure.slides),
+                stage="structure",
+            ),
+            stage="structure",
+        )
 
         should_include_toc = (
             request.include_table_of_contents and not using_slides_markdown
@@ -892,6 +932,7 @@ async def generate_presentation_handler(
                     request.tone.value,
                     request.verbosity.value,
                     request.instructions,
+                    contract_instructions_for_slide(contract_state, i),
                 )
                 for i in range(start, end)
             ]
@@ -902,6 +943,17 @@ async def generate_presentation_handler(
             for offset, slide_content in enumerate(batch_contents):
                 i = start + offset
                 slide_layout = slide_layouts[i]
+                slide_content, table_issues = overlay_contract_tables(
+                    slide_content,
+                    slide_layout.json_schema,
+                    contract_state,
+                    i,
+                )
+                enforce_contract_or_raise(
+                    contract_state,
+                    table_issues,
+                    stage="slide_content",
+                )
                 slide = SlideModel(
                     presentation=presentation_id,
                     layout_group=layout_model.name,
@@ -934,6 +986,15 @@ async def generate_presentation_handler(
             ]
             async_assets_generation_tasks.extend(asset_tasks)
 
+        enforce_contract_or_raise(
+            contract_state,
+            validate_slide_json_contract(
+                contract_state,
+                [slide.content for slide in slides],
+            ),
+            stage="slide_content",
+        )
+
         if async_status:
             async_status.message = "Fetching assets for slides"
             async_status.updated_at = datetime.now()
@@ -964,6 +1025,12 @@ async def generate_presentation_handler(
             request.export_as,
             cookie_header=export_cookie_header,
         )
+        if request.export_as == "pptx":
+            enforce_contract_or_raise(
+                contract_state,
+                validate_pptx_contract(contract_state, presentation_and_path.path),
+                stage="pptx_export",
+            )
 
         response = PresentationPathAndEditPath(
             **presentation_and_path.model_dump(),
@@ -1017,8 +1084,8 @@ async def generate_presentation_handler(
 
 @PRESENTATION_ROUTER.post("/generate", response_model=PresentationPathAndEditPath)
 async def generate_presentation_sync(
-    request_http: Request,
     request: GeneratePresentationRequest,
+    request_http: Request = None,
     sql_session: AsyncSession = Depends(get_async_session),
 ):
     try:
@@ -1027,7 +1094,9 @@ async def generate_presentation_sync(
             request,
             presentation_id,
             None,
-            export_cookie_header=_build_export_cookie_header(request_http),
+            export_cookie_header=(
+                _build_export_cookie_header(request_http) if request_http else None
+            ),
             sql_session=sql_session,
         )
     except HTTPException:

@@ -1,0 +1,763 @@
+import copy
+import re
+from dataclasses import dataclass, field
+from typing import Any, Iterable, Optional
+
+from fastapi import HTTPException
+from pptx import Presentation
+
+
+SECTION_HEADING_RE = re.compile(r"^\s*#{1,6}\s*(?:(\d+)[.)]?\s*)?(.*?)\s*$")
+TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
+DATE_RE = re.compile(
+    r"\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/20\d{2}|"
+    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)"
+    r"[a-z]*\s+\d{1,2},?\s+20\d{2})\b",
+    re.IGNORECASE,
+)
+METRIC_RE = re.compile(
+    r"(?<![\w.])[+-]?\$?\d[\d,]*(?:\.\d+)?%?"
+    r"(?:\s?(?:pp|bps|ms|sec|secs|seconds|m|k|K|M|B))?(?![\w.])"
+)
+
+
+@dataclass
+class ContractIssue:
+    reason: str
+    message: str
+    severity: str = "error"
+    stage: str = "contract"
+    section_index: Optional[int] = None
+    expected: Any = None
+    actual: Any = None
+
+    def to_dict(self) -> dict[str, Any]:
+        result = {
+            "severity": self.severity,
+            "reason": self.reason,
+            "message": self.message,
+            "stage": self.stage,
+        }
+        if self.section_index is not None:
+            result["section_index"] = self.section_index
+        if self.expected is not None:
+            result["expected"] = self.expected
+        if self.actual is not None:
+            result["actual"] = self.actual
+        return result
+
+
+@dataclass
+class ContractTable:
+    headers: list[str]
+    rows: list[list[str]]
+    slide_index: Optional[int] = None
+    section_title: Optional[str] = None
+    required: bool = True
+    source: str = "markdown"
+
+    @property
+    def column_count(self) -> int:
+        return len(self.headers)
+
+    @property
+    def row_count(self) -> int:
+        return len(self.rows)
+
+
+@dataclass
+class ContractSection:
+    index: int
+    title: str
+    markdown: str
+    tables: list[ContractTable] = field(default_factory=list)
+
+
+@dataclass
+class GenerationContractState:
+    enabled: bool
+    violation_policy: str = "fail"
+    slides_markdown: list[str] = field(default_factory=list)
+    sections: list[ContractSection] = field(default_factory=list)
+    locked_text: list[str] = field(default_factory=list)
+    forbidden_additions: list[str] = field(default_factory=list)
+    exact_terms: list[str] = field(default_factory=list)
+    evidence_tables: list[ContractTable] = field(default_factory=list)
+    tables_are_evidence: bool = False
+
+
+def strict_contract_enabled(request: Any) -> bool:
+    return (
+        getattr(request, "contract_mode", "off") == "strict"
+        or getattr(request, "generation_mode", "standard") == "layout_from_contract"
+        or getattr(request, "content_generation", "generate") == "preserve"
+    )
+
+
+def _clean_text(value: Any) -> str:
+    return " ".join(str(value or "").split()).strip()
+
+
+def _norm(value: Any) -> str:
+    return _clean_text(value).lower()
+
+
+def _strings(values: Iterable[Any]) -> list[str]:
+    result = []
+    for value in values or []:
+        text = _clean_text(value)
+        if text:
+            result.append(text)
+    return result
+
+
+def _contract_obj(contract: Any, name: str, default: Any) -> Any:
+    if contract is None:
+        return default
+    if isinstance(contract, dict):
+        return contract.get(name, default)
+    return getattr(contract, name, default)
+
+
+def _parse_table_row(line: str) -> list[str]:
+    raw = line.strip()
+    if raw.startswith("|"):
+        raw = raw[1:]
+    if raw.endswith("|"):
+        raw = raw[:-1]
+    cells = []
+    current = []
+    escaped = False
+    for char in raw:
+        if escaped:
+            current.append("|" if char == "|" else f"\\{char}")
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == "|":
+            cells.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+    if escaped:
+        current.append("\\")
+    cells.append("".join(current).strip())
+    return [_clean_text(cell) for cell in cells]
+
+
+def parse_markdown_tables(markdown: str) -> list[ContractTable]:
+    lines = str(markdown or "").splitlines()
+    tables: list[ContractTable] = []
+    i = 0
+    while i < len(lines) - 1:
+        if "|" not in lines[i] or not TABLE_SEPARATOR_RE.match(lines[i + 1] or ""):
+            i += 1
+            continue
+        headers = _parse_table_row(lines[i])
+        rows: list[list[str]] = []
+        i += 2
+        while i < len(lines) and "|" in lines[i] and lines[i].strip():
+            row = _parse_table_row(lines[i])
+            if row:
+                rows.append(row)
+            i += 1
+        if headers and rows:
+            tables.append(ContractTable(headers=headers, rows=rows))
+        continue
+    return tables
+
+
+def _section_title(markdown: str, fallback_index: int) -> str:
+    for line in str(markdown or "").splitlines():
+        match = SECTION_HEADING_RE.match(line)
+        if match:
+            return _clean_text(match.group(2)) or f"Section {fallback_index}"
+    return f"Section {fallback_index}"
+
+
+def _sections_from_markdown(slides_markdown: list[str]) -> list[ContractSection]:
+    sections = []
+    for index, markdown in enumerate(slides_markdown, start=1):
+        tables = parse_markdown_tables(markdown)
+        for table in tables:
+            table.slide_index = index
+            table.section_title = _section_title(markdown, index)
+        sections.append(
+            ContractSection(
+                index=index,
+                title=_section_title(markdown, index),
+                markdown=str(markdown or ""),
+                tables=tables,
+            )
+        )
+    return sections
+
+
+def _required_sections_to_markdown(required_sections: list[Any]) -> list[str]:
+    markdown = []
+    for offset, section in enumerate(required_sections or [], start=1):
+        if isinstance(section, str):
+            text = section
+            title = _section_title(text, offset)
+        elif isinstance(section, dict):
+            title = _clean_text(section.get("title")) or f"Section {offset}"
+            text = _clean_text(section.get("content"))
+        else:
+            title = _clean_text(getattr(section, "title", "")) or f"Section {offset}"
+            text = _clean_text(getattr(section, "content", ""))
+        if text and re.search(r"^\s*#{1,6}\s*", text, re.MULTILINE):
+            markdown.append(text)
+        else:
+            markdown.append(f"### {offset}. {title}\n\n{text}".strip())
+    return markdown
+
+
+def _table_from_contract(value: Any) -> Optional[ContractTable]:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        headers = value.get("headers") or value.get("columns") or []
+        rows = value.get("rows") or []
+        markdown = value.get("markdown")
+        slide_index = value.get("slide_index") or value.get("slideIndex")
+        section_title = value.get("section_title") or value.get("sectionTitle")
+        required = value.get("required", True)
+    else:
+        headers = getattr(value, "headers", []) or []
+        rows = getattr(value, "rows", []) or []
+        markdown = getattr(value, "markdown", None)
+        slide_index = getattr(value, "slide_index", None)
+        section_title = getattr(value, "section_title", None)
+        required = getattr(value, "required", True)
+    if markdown and not headers and not rows:
+        parsed = parse_markdown_tables(markdown)
+        if parsed:
+            table = parsed[0]
+            table.slide_index = slide_index
+            table.section_title = section_title
+            table.required = bool(required)
+            table.source = "generation_contract"
+            return table
+    clean_headers = _strings(headers)
+    clean_rows = [[_clean_text(cell) for cell in row] for row in rows or []]
+    if not clean_headers or not clean_rows:
+        return None
+    return ContractTable(
+        headers=clean_headers,
+        rows=clean_rows,
+        slide_index=slide_index,
+        section_title=section_title,
+        required=bool(required),
+        source="generation_contract",
+    )
+
+
+def _table_signature(table: ContractTable) -> tuple[Any, ...]:
+    return (
+        table.slide_index,
+        _norm(table.section_title),
+        tuple(_norm(cell) for cell in table.headers),
+        tuple(tuple(_norm(cell) for cell in row) for row in table.rows),
+    )
+
+
+def _dedupe_tables(tables: Iterable[ContractTable]) -> list[ContractTable]:
+    seen: set[tuple[Any, ...]] = set()
+    result = []
+    for table in tables:
+        signature = _table_signature(table)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        result.append(table)
+    return result
+
+
+def _extract_source_exact_terms(slides_markdown: list[str]) -> list[str]:
+    text = "\n".join(slides_markdown or [])
+    terms = set()
+    for pattern in (DATE_RE, METRIC_RE):
+        for match in pattern.findall(text):
+            cleaned = _clean_text(match)
+            if cleaned and not cleaned.isdigit():
+                terms.add(cleaned)
+    return sorted(terms, key=lambda item: (len(item), item.lower()))
+
+
+def build_generation_contract_state(request: Any) -> GenerationContractState:
+    enabled = strict_contract_enabled(request)
+    contract = getattr(request, "generation_contract", None)
+    violation_policy = _contract_obj(contract, "violation_policy", "fail")
+    slides_markdown = list(getattr(request, "slides_markdown", None) or [])
+    required_sections = list(_contract_obj(contract, "required_sections", []) or [])
+    if enabled and not slides_markdown and required_sections:
+        slides_markdown = _required_sections_to_markdown(required_sections)
+
+    sections = _sections_from_markdown(slides_markdown)
+    evidence_tables = [
+        table
+        for table in (_table_from_contract(value) for value in _contract_obj(contract, "evidence_tables", []) or [])
+        if table
+    ]
+    for section in sections:
+        evidence_tables.extend(section.tables)
+    evidence_tables = _dedupe_tables(evidence_tables)
+
+    exact_terms = _strings(_contract_obj(contract, "exact_terms", []) or [])
+    if enabled:
+        exact_terms.extend(term for term in _extract_source_exact_terms(slides_markdown) if term not in exact_terms)
+
+    return GenerationContractState(
+        enabled=enabled,
+        violation_policy=violation_policy,
+        slides_markdown=slides_markdown,
+        sections=sections,
+        locked_text=_strings(_contract_obj(contract, "locked_text", []) or []),
+        forbidden_additions=_strings(_contract_obj(contract, "forbidden_additions", []) or []),
+        exact_terms=exact_terms,
+        evidence_tables=evidence_tables,
+        tables_are_evidence=bool(_contract_obj(contract, "tables_are_evidence", False)),
+    )
+
+
+def diagnostic_payload(
+    issues: list[ContractIssue],
+    *,
+    stage: str,
+    status: str = "fail",
+) -> dict[str, Any]:
+    return {
+        "reason": "generation_contract_violation",
+        "status": status,
+        "stage": stage,
+        "issues": [issue.to_dict() for issue in issues],
+    }
+
+
+def enforce_contract_or_raise(
+    state: GenerationContractState,
+    issues: list[ContractIssue],
+    *,
+    stage: str,
+) -> None:
+    if not state.enabled or not issues:
+        return
+    payload = diagnostic_payload(issues, stage=stage)
+    if state.violation_policy == "warn":
+        print(f"[generation_contract] warning: {payload}", flush=True)
+        return
+    raise HTTPException(status_code=422, detail=payload)
+
+
+def validate_contract_request(state: GenerationContractState) -> list[ContractIssue]:
+    if not state.enabled:
+        return []
+    issues: list[ContractIssue] = []
+    if not state.sections:
+        issues.append(
+            ContractIssue(
+                reason="missing_required_sections",
+                message="Strict contract mode requires slides_markdown or generation_contract.required_sections.",
+                stage="request",
+            )
+        )
+        return issues
+    source_text = "\n\n".join(section.markdown for section in state.sections)
+    for locked in state.locked_text:
+        if locked not in source_text:
+            issues.append(
+                ContractIssue(
+                    reason="missing_locked_text",
+                    message="Locked text is not present in the supplied source contract.",
+                    stage="request",
+                    expected=locked,
+                )
+            )
+    for table in state.evidence_tables:
+        if table.column_count == 0 or table.row_count == 0:
+            issues.append(
+                ContractIssue(
+                    reason="empty_evidence_table",
+                    message="Evidence table must include headers and at least one row.",
+                    stage="request",
+                    section_index=table.slide_index,
+                )
+            )
+    return issues
+
+
+def validate_structure(
+    state: GenerationContractState,
+    slide_count: int,
+    *,
+    stage: str,
+) -> list[ContractIssue]:
+    if not state.enabled:
+        return []
+    expected = len(state.sections)
+    if slide_count != expected:
+        if slide_count < expected:
+            reason = "skipped_section"
+            message = "Strict mode must preserve every numbered section as a slide."
+        else:
+            reason = "extra_slide"
+            message = "Strict mode must not add slides beyond the numbered sections."
+        return [
+            ContractIssue(
+                reason=reason,
+                message=message,
+                stage=stage,
+                expected=expected,
+                actual=slide_count,
+            )
+        ]
+    return []
+
+
+def contract_instructions_for_slide(
+    state: GenerationContractState,
+    slide_index: int,
+) -> str:
+    if not state.enabled:
+        return ""
+    section = state.sections[slide_index] if slide_index < len(state.sections) else None
+    lines = [
+        "# Strict Contract Preservation",
+        "You may choose hierarchy, spacing, and concise non-critical wording, but you must not change facts.",
+        "Preserve exact metrics, dates, labels, and evidence nouns from the slide content.",
+        "Do not add advice, follow-up actions, or unsupported claims that are not in the slide content.",
+    ]
+    if section:
+        lines.append(f"This is section {section.index}: {section.title}. Keep it as this slide only.")
+    locked_for_slide = [
+        locked
+        for locked in state.locked_text
+        if section and locked in section.markdown
+    ]
+    if locked_for_slide:
+        lines.append("Locked text to copy verbatim:")
+        lines.extend(f"- {locked}" for locked in locked_for_slide)
+    table_count = len(section.tables) if section else 0
+    if table_count:
+        lines.append("Render markdown tables as table/data fields, not prose.")
+    if state.forbidden_additions:
+        lines.append("Forbidden additions:")
+        lines.extend(f"- {item}" for item in state.forbidden_additions)
+    return "\n".join(lines)
+
+
+def _schema_table_paths(schema: Any, path: Optional[list[str]] = None) -> list[tuple[list[str], str]]:
+    path = path or []
+    if not isinstance(schema, dict):
+        return []
+    props = schema.get("properties")
+    paths: list[tuple[list[str], str]] = []
+    if isinstance(props, dict):
+        row_schema = props.get("rows")
+        if "headers" in props and row_schema is not None:
+            paths.append((path, "headers"))
+        if "columns" in props and row_schema is not None:
+            paths.append((path, "columns"))
+        for key, child in props.items():
+            paths.extend(_schema_table_paths(child, [*path, key]))
+    return paths
+
+
+def _schema_at_path(schema: dict, path: list[str]) -> dict:
+    current = schema
+    for key in path:
+        current = current.get("properties", {}).get(key, {})
+    return current if isinstance(current, dict) else {}
+
+
+def _max_items(schema: dict, key: str) -> Optional[int]:
+    child = schema.get("properties", {}).get(key, {})
+    value = child.get("maxItems") if isinstance(child, dict) else None
+    return value if isinstance(value, int) else None
+
+
+def _get_path(target: dict, path: list[str]) -> Any:
+    current: Any = target
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _set_path(target: dict, path: list[str], value: Any) -> None:
+    current = target
+    for key in path[:-1]:
+        child = current.get(key)
+        if not isinstance(child, dict):
+            child = {}
+            current[key] = child
+        current = child
+    if path:
+        current[path[-1]] = value
+    else:
+        target.clear()
+        target.update(value)
+
+
+def _table_fits_schema(table: ContractTable, schema: dict, header_key: str) -> bool:
+    max_cols = _max_items(schema, header_key)
+    max_rows = _max_items(schema, "rows")
+    return not (
+        (max_cols is not None and table.column_count > max_cols)
+        or (max_rows is not None and table.row_count > max_rows)
+    )
+
+
+def _table_payload(table: ContractTable, header_key: str) -> dict[str, Any]:
+    return {
+        header_key: list(table.headers),
+        "rows": [list(row) for row in table.rows],
+    }
+
+
+def overlay_contract_tables(
+    slide_content: dict,
+    slide_schema: dict,
+    state: GenerationContractState,
+    slide_index: int,
+) -> tuple[dict, list[ContractIssue]]:
+    if not state.enabled:
+        return slide_content, []
+    section = state.sections[slide_index] if slide_index < len(state.sections) else None
+    tables = _dedupe_tables(
+        [
+            *(section.tables if section else []),
+            *(
+                table
+                for table in state.evidence_tables
+                if table.slide_index == slide_index + 1
+            ),
+        ]
+    )
+    if not tables:
+        return slide_content, []
+
+    content = copy.deepcopy(slide_content)
+    schema_paths = _schema_table_paths(slide_schema)
+    issues: list[ContractIssue] = []
+    used_paths: set[tuple[str, ...]] = set()
+    for table in tables:
+        selected: Optional[tuple[list[str], str]] = None
+        for path, header_key in schema_paths:
+            path_key = tuple(path)
+            if path_key in used_paths:
+                continue
+            if _table_fits_schema(table, _schema_at_path(slide_schema, path), header_key):
+                selected = (path, header_key)
+                break
+        if not selected:
+            issues.append(
+                ContractIssue(
+                    reason="no_compatible_table_layout",
+                    message="Selected layout cannot preserve the required evidence table dimensions.",
+                    stage="slide_content",
+                    section_index=slide_index + 1,
+                    expected={"columns": table.column_count, "rows": table.row_count},
+                )
+            )
+            continue
+        path, header_key = selected
+        existing = _get_path(content, path)
+        payload = _table_payload(table, header_key)
+        if path and not isinstance(existing, dict):
+            _set_path(content, path, payload)
+        elif path:
+            _set_path(content, path, {**(existing or {}), **payload})
+        else:
+            content.update(payload)
+        used_paths.add(tuple(path))
+    return content, issues
+
+
+def _walk_strings(value: Any) -> Iterable[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for child in value.values():
+            yield from _walk_strings(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk_strings(child)
+
+
+def visible_text_from_json(value: Any) -> str:
+    return "\n".join(_walk_strings(value))
+
+
+def _table_values_from_json(value: Any) -> list[ContractTable]:
+    tables: list[ContractTable] = []
+    if isinstance(value, dict):
+        headers = value.get("headers") or value.get("columns")
+        rows = value.get("rows")
+        if isinstance(headers, list) and isinstance(rows, list):
+            clean_headers = _strings(headers)
+            clean_rows = [[_clean_text(cell) for cell in row] for row in rows if isinstance(row, list)]
+            if clean_headers and clean_rows:
+                tables.append(ContractTable(headers=clean_headers, rows=clean_rows, source="json"))
+        for child in value.values():
+            tables.extend(_table_values_from_json(child))
+    elif isinstance(value, list):
+        for child in value:
+            tables.extend(_table_values_from_json(child))
+    return tables
+
+
+def _table_matches(expected: ContractTable, actual: ContractTable) -> bool:
+    return (
+        [_norm(cell) for cell in expected.headers] == [_norm(cell) for cell in actual.headers]
+        and [[_norm(cell) for cell in row] for row in expected.rows]
+        == [[_norm(cell) for cell in row] for row in actual.rows]
+    )
+
+
+def validate_slide_json_contract(
+    state: GenerationContractState,
+    slide_contents: list[dict],
+) -> list[ContractIssue]:
+    if not state.enabled:
+        return []
+    issues = validate_structure(state, len(slide_contents), stage="slide_content")
+    full_text = "\n".join(visible_text_from_json(slide) for slide in slide_contents)
+    normalized_full = _norm(full_text)
+
+    for locked in state.locked_text:
+        if locked not in full_text:
+            issues.append(
+                ContractIssue(
+                    reason="missing_locked_text",
+                    message="Generated slide JSON did not preserve locked text verbatim.",
+                    stage="slide_content",
+                    expected=locked,
+                )
+            )
+    for term in state.exact_terms:
+        if term and term not in full_text:
+            issues.append(
+                ContractIssue(
+                    reason="changed_metric_date_or_label",
+                    message="Generated slide JSON is missing an exact metric, date, or label.",
+                    stage="slide_content",
+                    expected=term,
+                )
+            )
+    for forbidden in state.forbidden_additions:
+        if _norm(forbidden) and _norm(forbidden) in normalized_full:
+            issues.append(
+                ContractIssue(
+                    reason="forbidden_addition",
+                    message="Generated slide JSON added forbidden content.",
+                    stage="slide_content",
+                    expected=forbidden,
+                )
+            )
+
+    actual_tables = []
+    for slide_index, content in enumerate(slide_contents, start=1):
+        for table in _table_values_from_json(content):
+            table.slide_index = slide_index
+            actual_tables.append(table)
+
+    for expected in state.evidence_tables:
+        matches = [table for table in actual_tables if _table_matches(expected, table)]
+        if not matches and (state.tables_are_evidence or expected.required):
+            expected_values = "\n".join(expected.headers + [cell for row in expected.rows for cell in row])
+            prose_has_values = all(_norm(cell) in normalized_full for cell in expected_values.splitlines() if _norm(cell))
+            issues.append(
+                ContractIssue(
+                    reason="table_rendered_as_prose" if prose_has_values else "changed_table_values",
+                    message="Evidence table was not preserved as a matching table object.",
+                    stage="slide_content",
+                    section_index=expected.slide_index,
+                    expected={"headers": expected.headers, "rows": expected.rows},
+                )
+            )
+    return issues
+
+
+def _extract_pptx(path: str) -> tuple[str, list[ContractTable]]:
+    prs = Presentation(path)
+    texts: list[str] = []
+    tables: list[ContractTable] = []
+    for slide_index, slide in enumerate(prs.slides, start=1):
+        for shape in slide.shapes:
+            if getattr(shape, "has_text_frame", False):
+                texts.append(shape.text)
+            if getattr(shape, "has_table", False):
+                rows = []
+                headers: list[str] = []
+                for row_index, row in enumerate(shape.table.rows):
+                    values = [_clean_text(cell.text) for cell in row.cells]
+                    texts.extend(values)
+                    if row_index == 0:
+                        headers = values
+                    else:
+                        rows.append(values)
+                if headers and rows:
+                    tables.append(
+                        ContractTable(
+                            headers=headers,
+                            rows=rows,
+                            slide_index=slide_index,
+                            source="pptx",
+                        )
+                    )
+    return "\n".join(texts), tables
+
+
+def validate_pptx_contract(
+    state: GenerationContractState,
+    path: str,
+) -> list[ContractIssue]:
+    if not state.enabled or not path:
+        return []
+    text, tables = _extract_pptx(path)
+    issues: list[ContractIssue] = []
+    for locked in state.locked_text:
+        if locked not in text:
+            issues.append(
+                ContractIssue(
+                    reason="missing_locked_text",
+                    message="Exported PPTX did not preserve locked text verbatim.",
+                    stage="pptx_export",
+                    expected=locked,
+                )
+            )
+    for term in state.exact_terms:
+        if term and term not in text:
+            issues.append(
+                ContractIssue(
+                    reason="changed_metric_date_or_label",
+                    message="Exported PPTX is missing an exact metric, date, or label.",
+                    stage="pptx_export",
+                    expected=term,
+                )
+            )
+    normalized_text = _norm(text)
+    for forbidden in state.forbidden_additions:
+        if _norm(forbidden) and _norm(forbidden) in normalized_text:
+            issues.append(
+                ContractIssue(
+                    reason="forbidden_addition",
+                    message="Exported PPTX contains forbidden content.",
+                    stage="pptx_export",
+                    expected=forbidden,
+                )
+            )
+    for expected in state.evidence_tables:
+        if not any(_table_matches(expected, actual) for actual in tables):
+            issues.append(
+                ContractIssue(
+                    reason="changed_table_values",
+                    message="Exported PPTX did not preserve an evidence table.",
+                    stage="pptx_export",
+                    section_index=expected.slide_index,
+                    expected={"headers": expected.headers, "rows": expected.rows},
+                )
+            )
+    return issues

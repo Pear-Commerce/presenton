@@ -556,6 +556,34 @@ Options: <code>pptx</code>, <code>pdf</code>
 </td>
 </tr>
 
+<tr>
+<td><code>contract_mode</code></td>
+<td>string</td>
+<td>No</td>
+<td>Use <code>"strict"</code> to enforce contract-preserving generation. Default: <code>"off"</code>.</td>
+</tr>
+
+<tr>
+<td><code>generation_mode</code></td>
+<td>string</td>
+<td>No</td>
+<td>Use <code>"layout_from_contract"</code> to let Presenton choose layouts while keeping the supplied section contract fixed. Default: <code>"standard"</code>.</td>
+</tr>
+
+<tr>
+<td><code>content_generation</code></td>
+<td>string</td>
+<td>No</td>
+<td>Use <code>"preserve"</code> to keep source facts and evidence fixed. Default: <code>"generate"</code>.</td>
+</tr>
+
+<tr>
+<td><code>generation_contract</code></td>
+<td>object | null</td>
+<td>No</td>
+<td>Strict-mode contract containing locked text, required sections, forbidden additions, evidence tables, exact terms, table evidence policy, and violation policy.</td>
+</tr>
+
 </tbody>
 </table>
 
@@ -593,6 +621,246 @@ Options: <code>pptx</code>, <code>pdf</code>
 Prepend your server’s root URL to <code>path</code> and 
 <code>edit_path</code> to construct valid links.
 </blockquote>
+
+**Pear Fork: Strict Contract-Preserving Generation**
+
+This Pear fork adds strict generation for QBR and evidence-heavy decks. Use only `https://github.com/Pear-Commerce/presenton` as the Pear canonical fork, with `upstream=https://github.com/presenton/presenton`.
+
+Strict mode is enabled by any of these fields:
+
+- `contract_mode: "strict"`
+- `generation_mode: "layout_from_contract"`
+- `content_generation: "preserve"`
+
+`generation_contract` supports:
+
+- `locked_text: string[]` - exact sentences or phrases that must appear verbatim.
+- `required_sections: Array<string | { index?: number, title?: string, content?: string }>` - fixed section list used when `slides_markdown` is not supplied.
+- `forbidden_additions: string[]` - phrases or concepts that must not appear.
+- `evidence_tables: Array<{ slide_index?: number, section_title?: string, headers?: string[], rows?: string[][], markdown?: string, required?: boolean }>` - exact table evidence.
+- `exact_terms: string[]` - metrics, dates, labels, and terms that must not change.
+- `tables_are_evidence: boolean` - fail if required tables are rendered only as prose or cannot fit a table-capable layout.
+- `violation_policy: "fail" | "warn"` - default is `fail`.
+
+In strict mode, Presenton preserves one slide per numbered section, locked text verbatim, exact metrics/dates/labels, markdown evidence tables as real table data when the selected template schema supports tables, and the absence of forbidden generic advice. Presenton AI may still select layouts, improve visual hierarchy, spacing, and fit, and lightly polish non-critical prose that is not locked or exact evidence.
+
+**Strict-mode request example**
+
+<pre><code class="language-bash">curl -u username:password \
+  -X POST http://localhost:5000/api/v1/ppt/presentation/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "Create a QBR from the supplied contract.",
+    "slides_markdown": [
+      "### 1. Executive Answer\n\nLocked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
+      "### 2. Evidence Table\n\n| Retailer | Visit Rate | Date |\n| --- | --- | --- |\n| Target | 7.1% | 2026-05-16 |"
+    ],
+    "contract_mode": "strict",
+    "generation_mode": "layout_from_contract",
+    "content_generation": "preserve",
+    "generation_contract": {
+      "locked_text": [
+        "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16."
+      ],
+      "forbidden_additions": [
+        "generic validation advice",
+        "checkout optimization",
+        "page speed recommendations"
+      ],
+      "evidence_tables": [
+        {
+          "slide_index": 2,
+          "headers": ["Retailer", "Visit Rate", "Date"],
+          "rows": [["Target", "7.1%", "2026-05-16"]]
+        }
+      ],
+      "exact_terms": ["Target", "7.1%", "2026-05-16"],
+      "tables_are_evidence": true,
+      "violation_policy": "fail"
+    },
+    "template": "general",
+    "include_table_of_contents": false,
+    "include_title_slide": false,
+    "web_search": false,
+    "export_as": "pptx"
+  }'</code></pre>
+
+**Structured diagnostics**
+
+Strict failures return HTTP `422` with a stable diagnostic payload:
+
+<pre><code class="language-json">{
+  "detail": {
+    "reason": "generation_contract_violation",
+    "status": "fail",
+    "stage": "slide_content",
+    "issues": [
+      {
+        "severity": "error",
+        "reason": "missing_locked_text",
+        "message": "Generated slide JSON did not preserve locked text verbatim.",
+        "stage": "slide_content",
+        "expected": "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16."
+      },
+      {
+        "severity": "error",
+        "reason": "changed_table_values",
+        "message": "Evidence table was not preserved as a matching table object.",
+        "stage": "slide_content",
+        "section_index": 2,
+        "expected": { "headers": ["Retailer", "Visit Rate", "Date"], "rows": [["Target", "7.1%", "2026-05-16"]] }
+      },
+      {
+        "severity": "error",
+        "reason": "skipped_section",
+        "message": "Strict mode must preserve every numbered section as a slide.",
+        "stage": "structure",
+        "expected": 3,
+        "actual": 2
+      },
+      {
+        "severity": "error",
+        "reason": "extra_slide",
+        "message": "Strict mode must not add slides beyond the numbered sections.",
+        "stage": "structure",
+        "expected": 3,
+        "actual": 4
+      },
+      {
+        "severity": "error",
+        "reason": "forbidden_addition",
+        "message": "Generated slide JSON added forbidden content.",
+        "stage": "slide_content",
+        "expected": "checkout optimization"
+      },
+      {
+        "severity": "error",
+        "reason": "changed_metric_date_or_label",
+        "message": "Generated slide JSON is missing an exact metric, date, or label.",
+        "stage": "slide_content",
+        "expected": "2026-05-16"
+      },
+      {
+        "severity": "error",
+        "reason": "table_rendered_as_prose",
+        "message": "Evidence table was not preserved as a matching table object.",
+        "stage": "slide_content",
+        "section_index": 2
+      }
+    ]
+  }
+}</code></pre>
+
+**Local tests**
+
+<pre><code class="language-bash">cd servers/fastapi
+uv run pytest
+
+cd ../nextjs
+npm run lint
+npm run build</code></pre>
+
+For the Pear QBR caller:
+
+<pre><code class="language-bash">cd /Users/eric/pear-dashboard-api-presenton-qbr
+npm test -- tests/server/agentRuns/qbrPresentonRenderer.test.js tests/server/agentRuns/qbrPresentonArtifact.test.js</code></pre>
+
+**Pear deploy: presenton-test.intern.pearcommerce.com**
+
+Deploy only from pushed Pear `main`. The live test instance is EC2 `i-030ec83d92fe974e5` (`presenton-test`), service `presenton.service`, env file `/etc/presenton/presenton.env`, and persistent bind mount `/opt/presenton/app_data:/app_data`.
+
+Hard warning: never wipe, recreate, replace, or reinitialize `/opt/presenton/app_data`. Never set `RESET_AUTH` or `AUTH_OVERRIDE_FROM_ENV` during normal deploy. Critical files that must remain present are `fastapi.db`, `mem0/history.db`, `userConfig.json`, and `userConfig.json.bak`.
+
+Build and push a pinned Pear image:
+
+<pre><code class="language-bash">git checkout main
+git pull --ff-only origin main
+SHA="$(git rev-parse --short=12 HEAD)"
+FULL_SHA="$(git rev-parse HEAD)"
+IMAGE="ghcr.io/pear-commerce/presenton:contract-preserving-${SHA}"
+docker build \
+  --build-arg PRESENTON_BUILD_SHA="${FULL_SHA}" \
+  --build-arg PRESENTON_BUILD_REF="main" \
+  --build-arg PRESENTON_SOURCE_REPO="Pear-Commerce/presenton" \
+  -t "${IMAGE}" .
+docker push "${IMAGE}"</code></pre>
+
+Before restart, use AWS SSM or SSH to record the current state and back up data without stopping the container:
+
+<pre><code class="language-bash">aws ssm start-session --target i-030ec83d92fe974e5
+
+TS="$(date -u +%Y%m%dT%H%M%SZ)"
+BACKUP_DIR="/opt/presenton/deploy-backups/${TS}"
+sudo install -d -m 700 "${BACKUP_DIR}"
+sudo cp /etc/presenton/presenton.env "${BACKUP_DIR}/presenton.env"
+sudo cp /etc/systemd/system/presenton.service "${BACKUP_DIR}/presenton.service"
+sudo docker inspect presenton --format '{{.Config.Image}} {{range .RepoDigests}}{{.}}{{end}}' | sudo tee "${BACKUP_DIR}/current-image.txt"
+sudo cp /opt/presenton/app_data/userConfig.json "${BACKUP_DIR}/userConfig.json"
+sudo cp /opt/presenton/app_data/userConfig.json.bak "${BACKUP_DIR}/userConfig.json.bak"
+
+sudo docker exec presenton python - <<'PY'
+import os, sqlite3, time
+backup_dir = f"/app_data/deploy-backups/{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"
+os.makedirs(backup_dir, exist_ok=True)
+for src, name in [("/app_data/fastapi.db", "fastapi.db"), ("/app_data/mem0/history.db", "history.db")]:
+    source = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
+    dest = sqlite3.connect(os.path.join(backup_dir, name))
+    source.backup(dest)
+    dest.close()
+    source.close()
+print(backup_dir)
+PY
+
+sudo docker exec presenton python - <<'PY' | sudo tee "${BACKUP_DIR}/row-counts-before.txt"
+import sqlite3
+for db in ["/app_data/fastapi.db", "/app_data/mem0/history.db"]:
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    print(db)
+    for (name,) in con.execute("select name from sqlite_master where type='table' order by name"):
+        try:
+            count = con.execute(f'select count(*) from "{name}"').fetchone()[0]
+            print(f"{name}: {count}")
+        except Exception as exc:
+            print(f"{name}: skipped ({exc})")
+    con.close()
+PY</code></pre>
+
+Update only the image reference in `/etc/systemd/system/presenton.service`. Preserve `/etc/presenton/presenton.env` and the exact `-v /opt/presenton/app_data:/app_data` bind mount. Then restart:
+
+<pre><code class="language-bash">sudo systemctl edit --full presenton.service
+sudo systemctl daemon-reload
+sudo systemctl restart presenton.service
+sudo systemctl status presenton.service --no-pager</code></pre>
+
+After restart, verify auth/config/data and the fork SHA:
+
+<pre><code class="language-bash">sudo docker inspect presenton --format '{{.Config.Image}} {{json .Mounts}}'
+sudo test -s /opt/presenton/app_data/fastapi.db
+sudo test -s /opt/presenton/app_data/mem0/history.db
+sudo test -s /opt/presenton/app_data/userConfig.json
+sudo test -s /opt/presenton/app_data/userConfig.json.bak
+sudo grep -E '^(AUTH_USERNAME|AUTH_PASSWORD)=' /etc/presenton/presenton.env >/dev/null
+if sudo grep -E '^(RESET_AUTH|AUTH_OVERRIDE_FROM_ENV)=' /etc/presenton/presenton.env; then echo "remove unsafe auth reset vars"; fi
+sudo docker exec presenton python - <<'PY'
+import sqlite3
+for db in ["/app_data/fastapi.db", "/app_data/mem0/history.db"]:
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    print(db)
+    for (name,) in con.execute("select name from sqlite_master where type='table' order by name"):
+        try:
+            count = con.execute(f'select count(*) from "{name}"').fetchone()[0]
+            print(f"{name}: {count}")
+        except Exception as exc:
+            print(f"{name}: skipped ({exc})")
+    con.close()
+PY
+AUTH_USERNAME="$(sudo awk -F= '/^AUTH_USERNAME=/{print $2}' /etc/presenton/presenton.env | tr -d '"')"
+AUTH_PASSWORD="$(sudo awk -F= '/^AUTH_PASSWORD=/{print $2}' /etc/presenton/presenton.env | tr -d '"')"
+curl -u "$AUTH_USERNAME:$AUTH_PASSWORD" https://presenton-test.intern.pearcommerce.com/api/v1/version</code></pre>
+
+Run the strict QBR smoke request against `https://presenton-test.intern.pearcommerce.com/api/v1/ppt/presentation/generate` using the strict-mode example above. Confirm the response creates exactly the requested slides, preserves locked text/table values, and returns the Pear `build_sha` from `/api/v1/version`.
+
+Rollback is image-only unless explicitly approved otherwise: restore the prior image reference/service unit from the backup directory, run `sudo systemctl daemon-reload`, and restart `presenton.service`. Restore DB/config files only with explicit approval.
 
 **Documentation & Tutorials**
 

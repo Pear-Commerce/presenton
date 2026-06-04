@@ -119,6 +119,160 @@ def test_generate_presentation_handler_full_flow_uses_mocked_dependencies(fake_a
     assert all(slide.presentation == presentation_id for slide in fake_async_session.added_all)
 
 
+def test_generate_presentation_handler_strict_mode_preserves_markdown_table(fake_async_session):
+    request = GeneratePresentationRequest(
+        content="Create a contract-preserving QBR.",
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Executive Answer",
+                    "",
+                    "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
+                ]
+            ),
+            "\n".join(
+                [
+                    "### 2. Evidence Table",
+                    "",
+                    "| Retailer | Visit Rate | Date |",
+                    "| --- | --- | --- |",
+                    "| Target | 7.1% | 2026-05-16 |",
+                ]
+            ),
+        ],
+        language="English",
+        export_as="pdf",
+        template="general",
+        contract_mode="strict",
+        generation_mode="layout_from_contract",
+        content_generation="preserve",
+        generation_contract={
+            "locked_text": [
+                "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16."
+            ],
+            "forbidden_additions": ["checkout optimization"],
+            "tables_are_evidence": True,
+        },
+    )
+    presentation_id = uuid.uuid4()
+    layout = PresentationLayoutModel(
+        name="general",
+        ordered=False,
+        slides=[
+            SlideLayoutModel(
+                id="layout-1",
+                name="Title",
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "body": {"type": "string"},
+                    },
+                },
+            ),
+            SlideLayoutModel(
+                id="layout-2",
+                name="Table",
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "tableData": {
+                            "type": "object",
+                            "properties": {
+                                "headers": {"type": "array", "maxItems": 4},
+                                "rows": {"type": "array", "maxItems": 4},
+                            },
+                        },
+                    },
+                },
+            ),
+        ],
+    )
+
+    get_slide_content = AsyncMock(
+        side_effect=[
+            {
+                "title": "Executive Answer",
+                "body": "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
+            },
+            {
+                "title": "Evidence Table",
+                "tableData": {
+                    "headers": ["Changed", "Value"],
+                    "rows": [["Wrong", "1%"]],
+                },
+            },
+        ]
+    )
+
+    with patch.object(
+        presentation_endpoint.MEM0_PRESENTATION_MEMORY_SERVICE,
+        "store_generation_context",
+        new=AsyncMock(),
+    ), patch.object(
+        presentation_endpoint.MEM0_PRESENTATION_MEMORY_SERVICE,
+        "store_generated_outlines",
+        new=AsyncMock(),
+    ), patch.object(
+        presentation_endpoint,
+        "get_layout_by_name",
+        new=AsyncMock(return_value=layout),
+    ), patch.object(
+        presentation_endpoint,
+        "generate_presentation_structure",
+        new=AsyncMock(return_value=PresentationStructureModel(slides=[0, 1])),
+    ), patch.object(
+        presentation_endpoint,
+        "get_slide_content_from_type_and_outline",
+        get_slide_content,
+    ), patch.object(
+        presentation_endpoint,
+        "process_slide_and_fetch_assets",
+        new=AsyncMock(return_value=[]),
+    ), patch.object(
+        presentation_endpoint,
+        "get_images_directory",
+        return_value="/tmp",
+    ), patch.object(
+        presentation_endpoint,
+        "ImageGenerationService",
+        return_value=Mock(),
+    ), patch.object(
+        presentation_endpoint,
+        "export_presentation",
+        new=AsyncMock(
+            return_value=PresentationAndPath(
+                presentation_id=presentation_id,
+                path="/tmp/generated/deck.pdf",
+            )
+        ),
+    ), patch.object(
+        presentation_endpoint.CONCURRENT_SERVICE,
+        "run_task",
+        new=Mock(),
+    ):
+        response = _run(
+            presentation_endpoint.generate_presentation_handler(
+                request=request,
+                presentation_id=presentation_id,
+                async_status=None,
+                sql_session=fake_async_session,
+            )
+        )
+
+    assert response.path.endswith(".pdf")
+    table_slide = fake_async_session.added_all[1]
+    assert table_slide.content["tableData"]["headers"] == [
+        "Retailer",
+        "Visit Rate",
+        "Date",
+    ]
+    assert table_slide.content["tableData"]["rows"] == [
+        ["Target", "7.1%", "2026-05-16"]
+    ]
+
+
 def test_prepare_presentation_preserves_payload_icon_weight():
     presentation_id = uuid.uuid4()
     presentation = PresentationModel(

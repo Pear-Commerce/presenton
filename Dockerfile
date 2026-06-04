@@ -75,6 +75,13 @@ WORKDIR /app
 
 ARG INSTALL_TESSERACT=true
 ARG INSTALL_LIBREOFFICE=true
+ARG PRESENTON_BUILD_SHA=""
+ARG PRESENTON_BUILD_REF="main"
+ARG PRESENTON_SOURCE_REPO="Pear-Commerce/presenton"
+
+LABEL org.opencontainers.image.source="${PRESENTON_SOURCE_REPO}" \
+      org.opencontainers.image.revision="${PRESENTON_BUILD_SHA}" \
+      org.opencontainers.image.ref.name="${PRESENTON_BUILD_REF}"
 
 # LiteParse uses Node + @llamaindex/liteparse (same runner as Electron); OCR uses Tesseract.
 ENV APP_DATA_DIRECTORY=/app_data \
@@ -83,6 +90,9 @@ ENV APP_DATA_DIRECTORY=/app_data \
     EXPORT_RUNTIME_DIR=/app/presentation-export \
     BUILT_PYTHON_MODULE_PATH=/app/presentation-export/py/convert-linux-x64 \
     PRESENTON_APP_ROOT=/app \
+    PRESENTON_BUILD_SHA=${PRESENTON_BUILD_SHA} \
+    PRESENTON_BUILD_REF=${PRESENTON_BUILD_REF} \
+    PRESENTON_SOURCE_REPO=${PRESENTON_SOURCE_REPO} \
     HF_HOME=/root/.cache/huggingface \
     PRESENTON_FASTEMBED_ICON_CACHE_DIR=/root/.cache/presenton/fastembed-icons \
     PATH="/opt/venv/bin:${PATH}" \
