@@ -589,6 +589,15 @@ def schema_with_contract_table_overrides(
     return schema
 
 
+def contract_table_issues_for_schema(
+    slide_schema: dict,
+    state: GenerationContractState,
+    slide_index: int,
+) -> list[ContractIssue]:
+    _, issues = overlay_contract_tables({}, slide_schema, state, slide_index)
+    return issues
+
+
 def overlay_contract_tables(
     slide_content: dict,
     slide_schema: dict,

@@ -69,7 +69,7 @@ def test_generate_presentation_handler_full_flow_uses_mocked_dependencies(fake_a
     ), patch.object(
         presentation_endpoint,
         "generate_presentation_structure",
-        new=AsyncMock(return_value=PresentationStructureModel(slides=[0, 1])),
+        new=AsyncMock(return_value=PresentationStructureModel(slides=[0, 0])),
     ), patch.object(
         presentation_endpoint,
         "get_slide_content_from_type_and_outline",
@@ -263,6 +263,7 @@ def test_generate_presentation_handler_strict_mode_preserves_markdown_table(fake
 
     assert response.path.endswith(".pdf")
     table_slide = fake_async_session.added_all[1]
+    assert table_slide.layout == "layout-2"
     assert table_slide.content["tableData"]["headers"] == [
         "Retailer",
         "Visit Rate",
@@ -272,6 +273,7 @@ def test_generate_presentation_handler_strict_mode_preserves_markdown_table(fake
         ["Target", "7.1%", "2026-05-16"]
     ]
     content_layout = get_slide_content.call_args_list[1].args[0]
+    assert content_layout.id == "layout-2"
     assert (
         content_layout.json_schema["properties"]["tableData"]["properties"]["rows"][
             "minItems"

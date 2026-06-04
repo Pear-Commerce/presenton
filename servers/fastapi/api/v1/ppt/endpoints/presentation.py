@@ -75,6 +75,7 @@ from utils.process_slides import (
 from utils.get_layout_by_name import get_layout_by_name
 from utils.generation_contract import (
     build_generation_contract_state,
+    contract_table_issues_for_schema,
     contract_instructions_for_slide,
     enforce_contract_or_raise,
     overlay_contract_tables,
@@ -915,6 +916,36 @@ async def generate_presentation_handler(
         slides: List[SlideModel] = []
 
         slide_layout_indices = presentation_structure.slides
+        for i, layout_index in enumerate(list(slide_layout_indices)):
+            selected_layout = layout_model.slides[layout_index]
+            table_issues = contract_table_issues_for_schema(
+                selected_layout.json_schema,
+                contract_state,
+                i,
+            )
+            if not table_issues:
+                continue
+
+            replacement_index = None
+            for candidate_index, candidate_layout in enumerate(layout_model.slides):
+                candidate_issues = contract_table_issues_for_schema(
+                    candidate_layout.json_schema,
+                    contract_state,
+                    i,
+                )
+                if not candidate_issues:
+                    replacement_index = candidate_index
+                    break
+
+            if replacement_index is None:
+                enforce_contract_or_raise(
+                    contract_state,
+                    table_issues,
+                    stage="slide_content",
+                )
+            else:
+                slide_layout_indices[i] = replacement_index
+
         slide_layouts = [layout_model.slides[idx] for idx in slide_layout_indices]
         content_slide_layouts = [
             slide_layout.model_copy(
