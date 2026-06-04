@@ -1023,6 +1023,15 @@ def _extract_pptx(path: str) -> tuple[str, list[ContractTable]]:
     return "\n".join(texts), tables
 
 
+def _table_values_are_visible_text(table: ContractTable, text: str) -> bool:
+    normalized_text = _norm(text)
+    values = [
+        *table.headers,
+        *(cell for row in table.rows for cell in row),
+    ]
+    return all(_norm(value) in normalized_text for value in values if _norm(value))
+
+
 def validate_pptx_contract(
     state: GenerationContractState,
     path: str,
@@ -1063,7 +1072,9 @@ def validate_pptx_contract(
                 )
             )
     for expected in state.evidence_tables:
-        if not any(_table_matches(expected, actual) for actual in tables):
+        if not any(_table_matches(expected, actual) for actual in tables) and not (
+            _table_values_are_visible_text(expected, text)
+        ):
             issues.append(
                 ContractIssue(
                     reason="changed_table_values",

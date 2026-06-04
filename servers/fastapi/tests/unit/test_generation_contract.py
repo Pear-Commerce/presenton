@@ -1,5 +1,6 @@
 from fastapi import HTTPException
 
+from utils import generation_contract as generation_contract_module
 from models.generate_presentation_request import GeneratePresentationRequest
 from models.api_error_model import APIErrorModel
 from utils.generation_contract import (
@@ -12,6 +13,7 @@ from utils.generation_contract import (
     parse_markdown_tables,
     schema_with_contract_table_overrides,
     validate_contract_request,
+    validate_pptx_contract,
     validate_slide_json_contract,
     validate_structure,
     visible_text_from_json,
@@ -285,6 +287,30 @@ def test_validate_slide_json_contract_requires_visible_locked_text():
     assert "missing_locked_text" in reasons
     assert "changed_metric_date_or_label" not in reasons
     assert "changed_table_values" not in reasons
+
+
+def test_validate_pptx_contract_accepts_visible_text_table_export(monkeypatch):
+    state = build_generation_contract_state(strict_request())
+    text = "\n".join(
+        [
+            "Executive Answer",
+            "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
+            "Retailer",
+            "Visit Rate",
+            "Date",
+            "Target",
+            "7.1%",
+            "2026-05-16",
+        ]
+    )
+
+    monkeypatch.setattr(
+        generation_contract_module,
+        "_extract_pptx",
+        lambda _path: (text, []),
+    )
+
+    assert validate_pptx_contract(state, "/tmp/deck.pptx") == []
 
 
 def test_strict_contract_relaxes_table_minimums_for_exact_evidence():
