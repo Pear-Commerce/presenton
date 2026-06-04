@@ -55,6 +55,7 @@ class ContractIssue:
     section_index: Optional[int] = None
     expected: Any = None
     actual: Any = None
+    details: Optional[dict[str, Any]] = None
 
     def to_dict(self) -> dict[str, Any]:
         result = {
@@ -69,6 +70,8 @@ class ContractIssue:
             result["expected"] = self.expected
         if self.actual is not None:
             result["actual"] = self.actual
+        if self.details is not None:
+            result["details"] = self.details
         return result
 
 
@@ -214,8 +217,42 @@ def _parse_table_row(line: str) -> list[str]:
     return [_clean_text(cell) for cell in cells]
 
 
+def _strip_html_comments(markdown: str) -> str:
+    text = str(markdown or "")
+    result: list[str] = []
+    i = 0
+    while i < len(text):
+        start = text.find("<!--", i)
+        if start == -1:
+            _append_visible_markdown_segment(result, text[i:])
+            break
+        _append_visible_markdown_segment(result, text[i:start])
+        end = text.find("-->", start + 4)
+        if end == -1:
+            break
+        i = end + 3
+    return "".join(result)
+
+
+def _append_visible_markdown_segment(result: list[str], segment: str) -> None:
+    if not segment:
+        return
+    if (
+        result
+        and result[-1]
+        and result[-1][-1] in " \t"
+        and segment[0] in " \t"
+    ):
+        segment = segment.lstrip(" \t")
+    result.append(segment)
+
+
+def _sanitized_markdown_lines(markdown: str) -> list[str]:
+    return _strip_html_comments(markdown).splitlines()
+
+
 def parse_markdown_tables(markdown: str) -> list[ContractTable]:
-    lines = str(markdown or "").splitlines()
+    lines = _sanitized_markdown_lines(markdown)
     tables: list[ContractTable] = []
     i = 0
     while i < len(lines) - 1:
@@ -237,7 +274,7 @@ def parse_markdown_tables(markdown: str) -> list[ContractTable]:
 
 
 def _section_title(markdown: str, fallback_index: int) -> str:
-    for line in str(markdown or "").splitlines():
+    for line in _sanitized_markdown_lines(markdown):
         match = SECTION_HEADING_RE.match(line)
         if match:
             return _clean_text(match.group(2)) or f"Section {fallback_index}"
@@ -368,7 +405,7 @@ def _dedupe_text_blocks(blocks: Iterable[ContractTextBlock]) -> list[ContractTex
 
 
 def _source_text(slides_markdown: list[str]) -> str:
-    return "\n".join(slides_markdown or [])
+    return "\n".join(_strip_html_comments(markdown) for markdown in slides_markdown or [])
 
 
 def _extract_source_metric_terms(slides_markdown: list[str]) -> set[str]:
@@ -497,7 +534,9 @@ def validate_contract_request(state: GenerationContractState) -> list[ContractIs
             )
         )
         return issues
-    source_text = "\n\n".join(section.markdown for section in state.sections)
+    source_text = "\n\n".join(
+        _strip_html_comments(section.markdown) for section in state.sections
+    )
     for locked in state.locked_text:
         if locked not in source_text:
             issues.append(
@@ -564,10 +603,11 @@ def contract_instructions_for_slide(
     ]
     if section:
         lines.append(f"This is section {section.index}: {section.title}. Keep it as this slide only.")
+    visible_section_text = _strip_html_comments(section.markdown) if section else ""
     locked_for_slide = [
         locked
         for locked in state.locked_text
-        if section and locked in section.markdown
+        if section and locked in visible_section_text
     ]
     if locked_for_slide:
         lines.append("Locked text to copy verbatim:")
@@ -627,6 +667,16 @@ VISIBLE_JSON_TEXT_EXCLUDED_PATH_PARTS = {
     "icon",
     "logo",
 }
+RENDERER_INSTRUCTION_RE = re.compile(
+    r"^\s*(?:speaker\s+notes?|presenter\s+notes?|render(?:er)?\s+instructions?|"
+    r"layout\s+instructions?|design\s+instructions?|image\s+prompt|icon\s+query)\s*:",
+    re.IGNORECASE,
+)
+PRESERVED_TITLE_LINE_RE = re.compile(r"^\s*title\s*:\s*(.*?)\s*$", re.IGNORECASE)
+PRESERVED_SUBTITLE_LINE_RE = re.compile(
+    r"^\s*(subtitle|period)\s*:\s*(.*?)\s*$",
+    re.IGNORECASE,
+)
 
 
 def _key_priority(key: str) -> Optional[int]:
@@ -727,6 +777,23 @@ def _max_items(schema: dict, key: str) -> Optional[int]:
     return value if isinstance(value, int) else None
 
 
+def _min_items(schema: dict, key: str) -> Optional[int]:
+    child = schema.get("properties", {}).get(key, {})
+    value = child.get("minItems") if isinstance(child, dict) else None
+    return value if isinstance(value, int) else None
+
+
+def _schema_int(schema: Any, key: str) -> Optional[int]:
+    value = schema.get(key) if isinstance(schema, dict) else None
+    return value if isinstance(value, int) else None
+
+
+def _row_items_schema(schema: dict) -> dict:
+    rows_schema = schema.get("properties", {}).get("rows", {})
+    items_schema = rows_schema.get("items") if isinstance(rows_schema, dict) else None
+    return items_schema if isinstance(items_schema, dict) else {}
+
+
 def _relax_min_items(schema: Any, item_count: int) -> None:
     if not isinstance(schema, dict):
         return
@@ -778,13 +845,135 @@ def _set_path(target: dict, path: list[str], value: Any) -> None:
         target.update(value)
 
 
-def _table_fits_schema(table: ContractTable, schema: dict, header_key: str) -> bool:
+def _max_table_cells_per_row(table: ContractTable) -> int:
+    return max([table.column_count, *(len(row) for row in table.rows)], default=0)
+
+
+def _min_table_cells_per_row(table: ContractTable) -> int:
+    return min([table.column_count, *(len(row) for row in table.rows)], default=0)
+
+
+def _table_fit_candidate(
+    table: ContractTable,
+    schema: dict,
+    header_key: str,
+    path: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    candidate: dict[str, Any] = {
+        "header_key": header_key,
+    }
+    if path is not None:
+        candidate["field_path"] = _field_path(path)
+
     max_cols = _max_items(schema, header_key)
+    min_cols = _min_items(schema, header_key)
     max_rows = _max_items(schema, "rows")
-    return not (
-        (max_cols is not None and table.column_count > max_cols)
-        or (max_rows is not None and table.row_count > max_rows)
+    min_rows = _min_items(schema, "rows")
+    row_items_schema = _row_items_schema(schema)
+    max_cells_per_row = _schema_int(row_items_schema, "maxItems")
+    min_cells_per_row = _schema_int(row_items_schema, "minItems")
+    bounds = {
+        "maxColumns": max_cols,
+        "minColumns": min_cols,
+        "maxRows": max_rows,
+        "minRows": min_rows,
+        "maxCellsPerRow": max_cells_per_row,
+        "minCellsPerRow": min_cells_per_row,
+    }
+    candidate.update({key: value for key, value in bounds.items() if value is not None})
+
+    failures: list[str] = []
+    if max_cols is not None and table.column_count > max_cols:
+        failures.append("columns_exceed_maxColumns")
+    if max_rows is not None and table.row_count > max_rows:
+        failures.append("rows_exceed_maxRows")
+    if (
+        max_cells_per_row is not None
+        and _max_table_cells_per_row(table) > max_cells_per_row
+    ):
+        failures.append("cells_exceed_maxCellsPerRow")
+    if min_cells_per_row is not None:
+        relaxed_min_cells_per_row = min(min_cells_per_row, table.column_count)
+        if _min_table_cells_per_row(table) < relaxed_min_cells_per_row:
+            failures.append("cells_below_minCellsPerRow")
+
+    candidate["fits"] = not failures
+    if failures:
+        candidate["failure_reasons"] = failures
+    return candidate
+
+
+def _table_fits_schema(table: ContractTable, schema: dict, header_key: str) -> bool:
+    return bool(_table_fit_candidate(table, schema, header_key)["fits"])
+
+
+def _table_source_path(table: ContractTable, slide_index: int) -> str:
+    if table.source == "generation_contract":
+        return "generation_contract.evidence_tables"
+    source_index = table.slide_index - 1 if table.slide_index is not None else slide_index
+    return f"slides_markdown[{source_index}]"
+
+
+def _best_table_fit_candidate(
+    candidates: list[dict[str, Any]],
+) -> Optional[dict[str, Any]]:
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda candidate: (
+            len(candidate.get("failure_reasons", [])),
+            candidate.get("field_path", ""),
+        ),
     )
+
+
+def _table_fit_issue_details(
+    table: ContractTable,
+    slide_schema: dict,
+    schema_paths: list[tuple[list[str], str]],
+    slide_index: int,
+    used_paths: Optional[set[tuple[str, ...]]] = None,
+) -> dict[str, Any]:
+    used_paths = used_paths or set()
+    candidates = [
+        _table_fit_candidate(
+            table,
+            _schema_at_path(slide_schema, path),
+            header_key,
+            path,
+        )
+        for path, header_key in schema_paths
+        if tuple(path) not in used_paths
+    ]
+    best = _best_table_fit_candidate(candidates)
+    details: dict[str, Any] = {
+        "issue_code": "STRICT_PRESERVE_TABLE_FIT_FAILED",
+        "content_kind": "evidence_table",
+        "source_path": _table_source_path(table, slide_index),
+        "slide_index": slide_index,
+        "section_index": slide_index + 1,
+        "columns": table.column_count,
+        "rows": table.row_count,
+        "maxCellsInTableRow": _max_table_cells_per_row(table),
+        "minCellsInTableRow": _min_table_cells_per_row(table),
+        "candidate_count": len(candidates),
+    }
+    if best is not None:
+        details["candidate_path"] = best.get("field_path")
+        for key in (
+            "maxColumns",
+            "minColumns",
+            "maxRows",
+            "minRows",
+            "maxCellsPerRow",
+            "minCellsPerRow",
+        ):
+            if key in best:
+                details[key] = best[key]
+    if candidates:
+        details["candidates"] = candidates[:5]
+    return details
 
 
 def _table_payload(table: ContractTable, header_key: str) -> dict[str, Any]:
@@ -819,10 +1008,9 @@ def _text_blocks_for_slide(
     if not section:
         return []
     blocks = []
-    section_text = section.markdown
-    normalized_section_text = _norm(section_text)
+    section_text = _strip_html_comments(section.markdown)
     for locked in state.locked_text:
-        if locked in section_text or _norm(locked) in normalized_section_text:
+        if locked in section_text:
             blocks.append(
                 ContractTextBlock(
                     text=locked,
@@ -840,9 +1028,422 @@ def _combined_locked_text_for_slide(
     return "\n".join(block.text for block in _text_blocks_for_slide(state, slide_index))
 
 
+def _locked_texts_for_slide(
+    state: GenerationContractState,
+    slide_index: int,
+) -> list[str]:
+    return [block.text for block in _text_blocks_for_slide(state, slide_index)]
+
+
+def _locked_texts_missing_from_visible_content(
+    locked_texts: list[str],
+    visible_text: str,
+) -> list[str]:
+    return [text for text in locked_texts if text not in visible_text]
+
+
 def _text_fits_schema(text: str, schema: dict) -> bool:
     max_length = _max_length(schema)
     return max_length is None or len(text) <= max_length
+
+
+def _markdown_heading_title_line(markdown: str) -> Optional[tuple[int, str]]:
+    for index, line in enumerate(_sanitized_markdown_lines(markdown)):
+        match = SECTION_HEADING_RE.match(line)
+        if match:
+            title = _clean_text(match.group(2))
+            if title:
+                return index, title
+    return None
+
+
+def _markdown_heading_title(markdown: str) -> Optional[str]:
+    title_line = _markdown_heading_title_line(markdown)
+    return title_line[1] if title_line else None
+
+
+def _is_title_path(path: list[str]) -> bool:
+    if not path:
+        return False
+    normalized = re.sub(r"[^a-z0-9]+", "", path[-1].lower())
+    if normalized in {"title", "heading", "headline"}:
+        return True
+    if normalized == "subtitle":
+        return False
+    return normalized.endswith(("title", "heading", "headline")) or normalized.startswith(
+        ("title", "heading", "headline")
+    )
+
+
+def _is_subtitle_path(path: list[str]) -> bool:
+    if not path:
+        return False
+    normalized = re.sub(r"[^a-z0-9]+", "", path[-1].lower())
+    return any(name in normalized for name in ("subtitle", "caption", "note"))
+
+
+def _field_path(path: list[str]) -> str:
+    return ".".join(path)
+
+
+def _filtered_text_paths(
+    slide_schema: dict,
+    *,
+    title: Optional[bool] = None,
+    subtitle: Optional[bool] = None,
+    excluded_paths: Optional[set[tuple[str, ...]]] = None,
+) -> list[list[str]]:
+    excluded_paths = excluded_paths or set()
+    paths = []
+    for path, _ in _schema_text_paths(slide_schema):
+        if tuple(path) in excluded_paths:
+            continue
+        if title is not None and _is_title_path(path) != title:
+            continue
+        if subtitle is not None and _is_subtitle_path(path) != subtitle:
+            continue
+        paths.append(path)
+    return paths
+
+
+def _text_fit_candidates(
+    slide_schema: dict,
+    text: str,
+    *,
+    title: Optional[bool] = None,
+    subtitle: Optional[bool] = None,
+    excluded_paths: Optional[set[tuple[str, ...]]] = None,
+) -> list[dict[str, Any]]:
+    candidates = []
+    for path in _filtered_text_paths(
+        slide_schema,
+        title=title,
+        subtitle=subtitle,
+        excluded_paths=excluded_paths,
+    ):
+        schema = _schema_at_path(slide_schema, path)
+        candidate: dict[str, Any] = {
+            "field_path": _field_path(path),
+        }
+        max_length = _max_length(schema)
+        if max_length is not None:
+            candidate["maxLength"] = max_length
+            candidate["overBy"] = max(0, len(text) - max_length)
+        candidates.append(candidate)
+    return candidates
+
+
+def _best_fit_candidate(candidates: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    if not candidates:
+        return None
+    return max(
+        candidates,
+        key=lambda candidate: (
+            candidate.get("maxLength") is None,
+            candidate.get("maxLength", 0),
+        ),
+    )
+
+
+def _fit_issue_details(
+    slide_schema: dict,
+    text: str,
+    *,
+    content_kind: str,
+    slide_index: int,
+    title: Optional[bool] = None,
+    subtitle: Optional[bool] = None,
+    excluded_paths: Optional[set[tuple[str, ...]]] = None,
+    fallback_title: Optional[bool] = None,
+) -> dict[str, Any]:
+    candidates = _text_fit_candidates(
+        slide_schema,
+        text,
+        title=title,
+        subtitle=subtitle,
+        excluded_paths=excluded_paths,
+    )
+    best = _best_fit_candidate(candidates)
+    fallback_candidates: list[dict[str, Any]] = []
+    if best is None and fallback_title is not None:
+        fallback_candidates = _text_fit_candidates(
+            slide_schema,
+            text,
+            title=fallback_title,
+            subtitle=subtitle,
+            excluded_paths=excluded_paths,
+        )
+        best = _best_fit_candidate(fallback_candidates)
+
+    details: dict[str, Any] = {
+        "issue_code": "STRICT_PRESERVE_FIT_FAILED",
+        "content_kind": content_kind,
+        "source_path": f"slides_markdown[{slide_index}]",
+        "length": len(text),
+        "slide_index": slide_index,
+        "section_index": slide_index + 1,
+        "candidate_count": len(candidates),
+    }
+    if best is not None:
+        details["field_path"] = best["field_path"]
+        if "maxLength" in best:
+            details["maxLength"] = best["maxLength"]
+    if candidates:
+        details["candidates"] = candidates[:5]
+    if fallback_candidates:
+        details["fallback_candidate_count"] = len(fallback_candidates)
+        details["fallback_candidates"] = fallback_candidates[:5]
+    return details
+
+
+def _markdown_table_block_end(lines: list[str], start: int) -> Optional[int]:
+    if (
+        start + 1 >= len(lines)
+        or "|" not in lines[start]
+        or not TABLE_SEPARATOR_RE.match(lines[start + 1] or "")
+    ):
+        return None
+
+    i = start + 2
+    has_rows = False
+    while i < len(lines) and "|" in lines[i] and lines[i].strip():
+        has_rows = True
+        i += 1
+    if not has_rows:
+        return None
+    return i
+
+
+def _preserved_label_line(
+    markdown: str,
+    pattern: re.Pattern,
+) -> Optional[tuple[int, str]]:
+    for index, line in enumerate(_sanitized_markdown_lines(markdown)):
+        match = pattern.match(line)
+        if not match:
+            continue
+        value = _clean_text(match.group(match.lastindex or 1))
+        if value:
+            return index, value
+    return None
+
+
+def _preserved_markdown_body_text(
+    markdown: str,
+    consumed_line_indices: Optional[set[int]] = None,
+) -> str:
+    lines = _sanitized_markdown_lines(markdown)
+    consumed_line_indices = consumed_line_indices or set()
+    preserved: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        if i in consumed_line_indices:
+            i += 1
+            continue
+        if not stripped:
+            i += 1
+            continue
+        if stripped.startswith("<!--"):
+            i += 1
+            if "-->" in stripped:
+                continue
+            while i < len(lines) and "-->" not in lines[i]:
+                i += 1
+            if i < len(lines):
+                i += 1
+            continue
+        table_block_end = _markdown_table_block_end(lines, i)
+        if table_block_end is not None:
+            i = table_block_end
+            continue
+        if RENDERER_INSTRUCTION_RE.match(line):
+            i += 1
+            continue
+        heading_match = SECTION_HEADING_RE.match(line)
+        if heading_match:
+            heading_text = _clean_text(heading_match.group(2))
+            if heading_text:
+                preserved.append(heading_text)
+            i += 1
+            continue
+        preserved.append(line.rstrip())
+        i += 1
+    return "\n".join(preserved).strip()
+
+
+def _first_fitting_text_path(
+    slide_schema: dict,
+    text: str,
+    *,
+    title: Optional[bool] = None,
+    subtitle: Optional[bool] = None,
+    excluded_paths: Optional[set[tuple[str, ...]]] = None,
+) -> Optional[list[str]]:
+    for path in _filtered_text_paths(
+        slide_schema,
+        title=title,
+        subtitle=subtitle,
+        excluded_paths=excluded_paths,
+    ):
+        if _text_fits_schema(text, _schema_at_path(slide_schema, path)):
+            return path
+    return None
+
+
+def _build_preserved_markdown_text_content(
+    slide_schema: dict,
+    state: GenerationContractState,
+    slide_index: int,
+) -> tuple[dict, list[ContractIssue]]:
+    section = state.sections[slide_index] if slide_index < len(state.sections) else None
+    markdown = section.markdown if section else ""
+    content: dict[str, Any] = {}
+    issues: list[ContractIssue] = []
+    used_paths: set[tuple[str, ...]] = set()
+
+    consumed_line_indices: set[int] = set()
+    pending_title: Optional[str] = None
+    title_line = _preserved_label_line(markdown, PRESERVED_TITLE_LINE_RE)
+    heading_title_line = _markdown_heading_title_line(markdown)
+    title = title_line[1] if title_line else (
+        heading_title_line[1] if heading_title_line else None
+    )
+    if heading_title_line:
+        consumed_line_indices.add(heading_title_line[0])
+    if title:
+        title_path = _first_fitting_text_path(slide_schema, title, title=True)
+        if title_path:
+            _set_path(content, title_path, title)
+            used_paths.add(tuple(title_path))
+            if title_line:
+                consumed_line_indices.add(title_line[0])
+        else:
+            pending_title = title
+            if title_line:
+                consumed_line_indices.add(title_line[0])
+
+    subtitle_line = _preserved_label_line(markdown, PRESERVED_SUBTITLE_LINE_RE)
+    if subtitle_line:
+        subtitle_path = _first_fitting_text_path(
+            slide_schema,
+            subtitle_line[1],
+            subtitle=True,
+            excluded_paths=used_paths,
+        )
+        if subtitle_path:
+            _set_path(content, subtitle_path, subtitle_line[1])
+            used_paths.add(tuple(subtitle_path))
+            consumed_line_indices.add(subtitle_line[0])
+
+    body_text = _preserved_markdown_body_text(markdown, consumed_line_indices)
+    source_text = "\n".join(
+        part for part in [pending_title, body_text] if part
+    ).strip()
+    if source_text:
+        body_path = _first_fitting_text_path(
+            slide_schema,
+            source_text,
+            title=False,
+            excluded_paths=used_paths,
+        )
+        if body_path:
+            _set_path(content, body_path, source_text)
+            used_paths.add(tuple(body_path))
+        elif pending_title:
+            issues.append(
+                ContractIssue(
+                    reason="no_compatible_title_layout",
+                    message="Selected layout cannot preserve the markdown title in a visible text field.",
+                    stage="slide_content",
+                    section_index=slide_index + 1,
+                    expected=pending_title,
+                    details=_fit_issue_details(
+                        slide_schema,
+                        pending_title,
+                        content_kind="preserved_markdown_title",
+                        slide_index=slide_index,
+                        title=True,
+                        excluded_paths=used_paths,
+                        fallback_title=False,
+                    ),
+                )
+            )
+            if body_text:
+                body_path = _first_fitting_text_path(
+                    slide_schema,
+                    body_text,
+                    title=False,
+                    excluded_paths=used_paths,
+                )
+                if body_path:
+                    _set_path(content, body_path, body_text)
+                    used_paths.add(tuple(body_path))
+                else:
+                    issues.append(
+                        ContractIssue(
+                            reason="no_compatible_preserved_text_layout",
+                            message="Selected layout cannot preserve the supplied markdown text in a visible text field.",
+                            stage="slide_content",
+                            section_index=slide_index + 1,
+                            expected=body_text,
+                            details=_fit_issue_details(
+                                slide_schema,
+                                body_text,
+                                content_kind="preserved_markdown_body",
+                                slide_index=slide_index,
+                                title=False,
+                                excluded_paths=used_paths,
+                            ),
+                        )
+                    )
+        else:
+            issues.append(
+                ContractIssue(
+                    reason="no_compatible_preserved_text_layout",
+                    message="Selected layout cannot preserve the supplied markdown text in a visible text field.",
+                    stage="slide_content",
+                    section_index=slide_index + 1,
+                    expected=source_text,
+                    details=_fit_issue_details(
+                        slide_schema,
+                        source_text,
+                        content_kind="preserved_markdown_body",
+                        slide_index=slide_index,
+                        title=False,
+                        excluded_paths=used_paths,
+                    ),
+                )
+            )
+
+    return content, issues
+
+
+def build_preserved_slide_content(
+    slide_schema: dict,
+    state: GenerationContractState,
+    slide_index: int,
+) -> tuple[dict, list[ContractIssue]]:
+    content, issues = _build_preserved_markdown_text_content(
+        slide_schema,
+        state,
+        slide_index,
+    )
+    content, table_issues = overlay_contract_tables(
+        content,
+        slide_schema,
+        state,
+        slide_index,
+    )
+    content, text_issues = overlay_contract_text(
+        content,
+        slide_schema,
+        state,
+        slide_index,
+    )
+    issues.extend([*table_issues, *text_issues])
+    return content, issues
 
 
 def schema_with_contract_table_overrides(
@@ -888,9 +1489,10 @@ def contract_text_issues_for_schema(
     state: GenerationContractState,
     slide_index: int,
 ) -> list[ContractIssue]:
-    text = _combined_locked_text_for_slide(state, slide_index)
-    if not state.enabled or not text:
+    locked_texts = _locked_texts_for_slide(state, slide_index)
+    if not state.enabled or not locked_texts:
         return []
+    text = "\n".join(locked_texts)
     for path, _ in _schema_text_paths(slide_schema):
         if _text_fits_schema(text, _schema_at_path(slide_schema, path)):
             return []
@@ -903,6 +1505,41 @@ def contract_text_issues_for_schema(
             expected=text,
         )
     ]
+
+
+def contract_layout_issues_for_schema(
+    slide_schema: dict,
+    state: GenerationContractState,
+    slide_index: int,
+    *,
+    preserve_markdown: bool = False,
+) -> list[ContractIssue]:
+    if not state.enabled:
+        return []
+    if not preserve_markdown:
+        return [
+            *contract_table_issues_for_schema(slide_schema, state, slide_index),
+            *contract_text_issues_for_schema(slide_schema, state, slide_index),
+        ]
+
+    content, preserved_text_issues = _build_preserved_markdown_text_content(
+        slide_schema,
+        state,
+        slide_index,
+    )
+    content, table_issues = overlay_contract_tables(
+        content,
+        slide_schema,
+        state,
+        slide_index,
+    )
+    _, text_issues = overlay_contract_text(
+        content,
+        slide_schema,
+        state,
+        slide_index,
+    )
+    return [*preserved_text_issues, *table_issues, *text_issues]
 
 
 def overlay_contract_tables(
@@ -938,6 +1575,13 @@ def overlay_contract_tables(
                     stage="slide_content",
                     section_index=slide_index + 1,
                     expected={"columns": table.column_count, "rows": table.row_count},
+                    details=_table_fit_issue_details(
+                        table,
+                        slide_schema,
+                        schema_paths,
+                        slide_index,
+                        used_paths,
+                    ),
                 )
             )
             continue
@@ -962,18 +1606,41 @@ def overlay_contract_text(
 ) -> tuple[dict, list[ContractIssue]]:
     if not state.enabled:
         return slide_content, []
-    text = _combined_locked_text_for_slide(state, slide_index)
-    if not text:
+    locked_texts = _locked_texts_for_slide(state, slide_index)
+    if not locked_texts:
         return slide_content, []
-    if text in visible_text_from_json(slide_content):
+    visible_text = visible_text_from_json(slide_content)
+    missing_texts = _locked_texts_missing_from_visible_content(
+        locked_texts,
+        visible_text,
+    )
+    if not missing_texts:
         return slide_content, []
 
+    text = "\n".join(missing_texts)
     for path, _ in _schema_text_paths(slide_schema):
         if not _text_fits_schema(text, _schema_at_path(slide_schema, path)):
+            continue
+        existing = _get_path(slide_content, path)
+        if existing not in (None, ""):
             continue
         content = copy.deepcopy(slide_content)
         _set_path(content, path, text)
         return content, []
+
+    can_replace_existing_text = not any(
+        locked in visible_text for locked in locked_texts
+    )
+    if can_replace_existing_text:
+        for path, _ in _schema_text_paths(slide_schema):
+            if not _text_fits_schema(text, _schema_at_path(slide_schema, path)):
+                continue
+            existing = _get_path(slide_content, path)
+            if existing is not None and not isinstance(existing, str):
+                continue
+            content = copy.deepcopy(slide_content)
+            _set_path(content, path, text)
+            return content, []
 
     return slide_content, [
         ContractIssue(

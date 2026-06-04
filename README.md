@@ -642,7 +642,7 @@ Strict mode is enabled by any of these fields:
 - `tables_are_evidence: boolean` - fail if required tables are rendered only as prose or cannot fit a table-capable layout.
 - `violation_policy: "fail" | "warn"` - default is `fail`.
 
-In strict mode, Presenton preserves one slide per numbered section, locked text verbatim, exact metrics/dates/labels, markdown evidence tables as real table data when the selected template schema supports tables, and the absence of forbidden generic advice. Presenton AI may still select layouts, improve visual hierarchy, spacing, and fit, and lightly polish non-critical prose that is not locked or exact evidence.
+In strict preserve mode, Presenton preserves one slide per numbered section, deterministically transcribes supplied markdown prose, locked text, exact metrics/dates/labels, and markdown evidence tables as real table data when the selected template schema supports tables, and enforces the absence of forbidden generic advice. Presenton AI may still select layouts, visual hierarchy, spacing, and fit, but it must not polish, paraphrase, summarize, invent, or truncate supplied content.
 
 **Strict-mode request example**
 

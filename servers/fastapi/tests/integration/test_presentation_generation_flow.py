@@ -125,7 +125,9 @@ def test_generate_presentation_handler_strict_mode_preserves_markdown_table(fake
         slides_markdown=[
             "\n".join(
                 [
-                    "### 1. Executive Answer",
+                    "### 1. Cover",
+                    "",
+                    "Title: Create a Perdue QBR for Walmart vs. Target",
                     "",
                     "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
                 ]
@@ -190,21 +192,10 @@ def test_generate_presentation_handler_strict_mode_preserves_markdown_table(fake
         ],
     )
 
+    get_layout = AsyncMock(return_value=layout)
+    generate_structure = AsyncMock(return_value=PresentationStructureModel(slides=[0, 0]))
     get_slide_content = AsyncMock(
-        side_effect=[
-            {
-                "title": "Executive Answer",
-                "body": "Target had the strongest non-Walmart retailer visit rate in mid-May.",
-                "__speaker_note__": "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
-            },
-            {
-                "title": "Evidence Table",
-                "tableData": {
-                    "headers": ["Changed", "Value"],
-                    "rows": [["Wrong", "1%"]],
-                },
-            },
-        ]
+        side_effect=AssertionError("strict preserve must not call slide content LLM")
     )
 
     with patch.object(
@@ -218,11 +209,11 @@ def test_generate_presentation_handler_strict_mode_preserves_markdown_table(fake
     ), patch.object(
         presentation_endpoint,
         "get_layout_by_name",
-        new=AsyncMock(return_value=layout),
+        new=get_layout,
     ), patch.object(
         presentation_endpoint,
         "generate_presentation_structure",
-        new=AsyncMock(return_value=PresentationStructureModel(slides=[0, 0])),
+        new=generate_structure,
     ), patch.object(
         presentation_endpoint,
         "get_slide_content_from_type_and_outline",
@@ -264,9 +255,11 @@ def test_generate_presentation_handler_strict_mode_preserves_markdown_table(fake
 
     assert response.path.endswith(".pdf")
     summary_slide = fake_async_session.added_all[0]
+    assert summary_slide.content["title"] == "Create a Perdue QBR for Walmart vs. Target"
     assert summary_slide.content["body"] == (
         "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16."
     )
+    assert "Title:" not in summary_slide.content["body"]
     table_slide = fake_async_session.added_all[1]
     assert table_slide.layout == "layout-2"
     assert table_slide.content["tableData"]["headers"] == [
@@ -277,14 +270,147 @@ def test_generate_presentation_handler_strict_mode_preserves_markdown_table(fake
     assert table_slide.content["tableData"]["rows"] == [
         ["Target", "7.1%", "2026-05-16"]
     ]
-    content_layout = get_slide_content.call_args_list[1].args[0]
-    assert content_layout.id == "layout-2"
-    assert (
-        content_layout.json_schema["properties"]["tableData"]["properties"]["rows"][
-            "minItems"
-        ]
-        == 1
+    assert "strongest non-Walmart" not in str(summary_slide.content)
+    assert "Wrong" not in str(table_slide.content)
+    get_layout.assert_awaited_once_with("general")
+    generate_structure.assert_awaited_once()
+    get_slide_content.assert_not_awaited()
+
+
+def test_generate_presentation_handler_strict_preserve_replaces_narrow_prose_layout(
+    fake_async_session,
+):
+    locked = "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16."
+    prose_lines = [
+        locked,
+        "Question: Which retailer led the non-Walmart comparison?",
+        "Answer: Target led by a clear margin in the supplied source facts.",
+    ]
+    request = GeneratePresentationRequest(
+        content="Create a contract-preserving QBR.",
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Executive Answer",
+                    "",
+                    *prose_lines,
+                ]
+            )
+        ],
+        language="English",
+        export_as="pdf",
+        template="general",
+        contract_mode="strict",
+        generation_mode="layout_from_contract",
+        content_generation="preserve",
+        generation_contract={
+            "locked_text": [locked],
+            "tables_are_evidence": True,
+        },
     )
+    presentation_id = uuid.uuid4()
+    layout = PresentationLayoutModel(
+        name="general",
+        ordered=False,
+        slides=[
+            SlideLayoutModel(
+                id="narrow-body",
+                name="Narrow Body",
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "maxLength": 80},
+                        "body": {"type": "string", "maxLength": 80},
+                    },
+                },
+            ),
+            SlideLayoutModel(
+                id="wide-body",
+                name="Wide Body",
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "maxLength": 80},
+                        "body": {"type": "string", "maxLength": 500},
+                    },
+                },
+            ),
+        ],
+    )
+
+    get_layout = AsyncMock(return_value=layout)
+    generate_structure = AsyncMock(return_value=PresentationStructureModel(slides=[0]))
+    get_slide_content = AsyncMock(
+        side_effect=AssertionError("strict preserve must not call slide content LLM")
+    )
+
+    with patch.object(
+        presentation_endpoint.MEM0_PRESENTATION_MEMORY_SERVICE,
+        "store_generation_context",
+        new=AsyncMock(),
+    ), patch.object(
+        presentation_endpoint.MEM0_PRESENTATION_MEMORY_SERVICE,
+        "store_generated_outlines",
+        new=AsyncMock(),
+    ), patch.object(
+        presentation_endpoint,
+        "get_layout_by_name",
+        new=get_layout,
+    ), patch.object(
+        presentation_endpoint,
+        "generate_presentation_structure",
+        new=generate_structure,
+    ), patch.object(
+        presentation_endpoint,
+        "get_slide_content_from_type_and_outline",
+        get_slide_content,
+    ), patch.object(
+        presentation_endpoint,
+        "process_slide_and_fetch_assets",
+        new=AsyncMock(return_value=[]),
+    ), patch.object(
+        presentation_endpoint,
+        "get_images_directory",
+        return_value="/tmp",
+    ), patch.object(
+        presentation_endpoint,
+        "ImageGenerationService",
+        return_value=Mock(),
+    ), patch.object(
+        presentation_endpoint,
+        "export_presentation",
+        new=AsyncMock(
+            return_value=PresentationAndPath(
+                presentation_id=presentation_id,
+                path="/tmp/generated/deck.pdf",
+            )
+        ),
+    ), patch.object(
+        presentation_endpoint.CONCURRENT_SERVICE,
+        "run_task",
+        new=Mock(),
+    ):
+        response = _run(
+            presentation_endpoint.generate_presentation_handler(
+                request=request,
+                presentation_id=presentation_id,
+                async_status=None,
+                sql_session=fake_async_session,
+            )
+        )
+
+    assert response.path.endswith(".pdf")
+    presentation = fake_async_session.added[0]
+    assert isinstance(presentation, PresentationModel)
+    assert presentation.structure["slides"] == [1]
+    slide = fake_async_session.added_all[0]
+    assert slide.layout == "wide-body"
+    assert slide.content["title"] == "Executive Answer"
+    assert slide.content["body"] == "\n".join(prose_lines)
+    assert locked in slide.content["body"]
+    get_layout.assert_awaited_once_with("general")
+    generate_structure.assert_awaited_once()
+    get_slide_content.assert_not_awaited()
 
 
 def test_generate_presentation_handler_strict_violation_returns_structured_422(
@@ -335,6 +461,9 @@ def test_generate_presentation_handler_strict_violation_returns_structured_422(
             ),
         ],
     )
+    get_slide_content = AsyncMock(
+        side_effect=AssertionError("strict preserve must not call slide content LLM")
+    )
 
     with patch.object(
         presentation_endpoint.MEM0_PRESENTATION_MEMORY_SERVICE,
@@ -355,7 +484,7 @@ def test_generate_presentation_handler_strict_violation_returns_structured_422(
     ), patch.object(
         presentation_endpoint,
         "get_slide_content_from_type_and_outline",
-        new=AsyncMock(return_value={"title": "Evidence Table"}),
+        new=get_slide_content,
     ), patch.object(
         presentation_endpoint,
         "process_slide_and_fetch_assets",
@@ -386,6 +515,7 @@ def test_generate_presentation_handler_strict_violation_returns_structured_422(
     assert exc.value.status_code == 422
     assert exc.value.detail["reason"] == "generation_contract_violation"
     assert exc.value.detail["issues"][0]["reason"] == "no_compatible_table_layout"
+    get_slide_content.assert_not_awaited()
 
 
 def test_prepare_presentation_preserves_payload_icon_weight():

@@ -74,9 +74,9 @@ from utils.process_slides import (
 )
 from utils.get_layout_by_name import get_layout_by_name
 from utils.generation_contract import (
+    build_preserved_slide_content,
     build_generation_contract_state,
-    contract_table_issues_for_schema,
-    contract_text_issues_for_schema,
+    contract_layout_issues_for_schema,
     contract_instructions_for_slide,
     enforce_contract_or_raise,
     overlay_contract_text,
@@ -918,37 +918,26 @@ async def generate_presentation_handler(
         slides: List[SlideModel] = []
 
         slide_layout_indices = presentation_structure.slides
+        preserve_markdown_layout = contract_state.enabled and using_slides_markdown
         for i, layout_index in enumerate(list(slide_layout_indices)):
             selected_layout = layout_model.slides[layout_index]
-            contract_issues = [
-                *contract_table_issues_for_schema(
-                    selected_layout.json_schema,
-                    contract_state,
-                    i,
-                ),
-                *contract_text_issues_for_schema(
-                    selected_layout.json_schema,
-                    contract_state,
-                    i,
-                ),
-            ]
+            contract_issues = contract_layout_issues_for_schema(
+                selected_layout.json_schema,
+                contract_state,
+                i,
+                preserve_markdown=preserve_markdown_layout,
+            )
             if not contract_issues:
                 continue
 
             replacement_index = None
             for candidate_index, candidate_layout in enumerate(layout_model.slides):
-                candidate_issues = [
-                    *contract_table_issues_for_schema(
-                        candidate_layout.json_schema,
-                        contract_state,
-                        i,
-                    ),
-                    *contract_text_issues_for_schema(
-                        candidate_layout.json_schema,
-                        contract_state,
-                        i,
-                    ),
-                ]
+                candidate_issues = contract_layout_issues_for_schema(
+                    candidate_layout.json_schema,
+                    contract_state,
+                    i,
+                    preserve_markdown=preserve_markdown_layout,
+                )
                 if not candidate_issues:
                     replacement_index = candidate_index
                     break
@@ -961,6 +950,8 @@ async def generate_presentation_handler(
                 )
             else:
                 slide_layout_indices[i] = replacement_index
+
+        presentation.set_structure(presentation_structure)
 
         slide_layouts = [layout_model.slides[idx] for idx in slide_layout_indices]
         content_slide_layouts = [
@@ -983,20 +974,37 @@ async def generate_presentation_handler(
 
             print(f"Generating slides from {start} to {end}")
 
-            # Generate contents for this batch concurrently
-            content_tasks = [
-                get_slide_content_from_type_and_outline(
-                    content_slide_layouts[i],
-                    presentation_outlines.slides[i],
-                    language_to_use,
-                    request.tone.value,
-                    request.verbosity.value,
-                    request.instructions,
-                    contract_instructions_for_slide(contract_state, i),
+            if contract_state.enabled and using_slides_markdown:
+                batch_contents = []
+                preserved_content_issues = []
+                for i in range(start, end):
+                    slide_content, content_issues = build_preserved_slide_content(
+                        content_slide_layouts[i].json_schema,
+                        contract_state,
+                        i,
+                    )
+                    batch_contents.append(slide_content)
+                    preserved_content_issues.extend(content_issues)
+                enforce_contract_or_raise(
+                    contract_state,
+                    preserved_content_issues,
+                    stage="slide_content",
                 )
-                for i in range(start, end)
-            ]
-            batch_contents: List[dict] = await asyncio.gather(*content_tasks)
+            else:
+                # Generate contents for this batch concurrently
+                content_tasks = [
+                    get_slide_content_from_type_and_outline(
+                        content_slide_layouts[i],
+                        presentation_outlines.slides[i],
+                        language_to_use,
+                        request.tone.value,
+                        request.verbosity.value,
+                        request.instructions,
+                        contract_instructions_for_slide(contract_state, i),
+                    )
+                    for i in range(start, end)
+                ]
+                batch_contents: List[dict] = await asyncio.gather(*content_tasks)
 
             # Build slides for this batch
             batch_slides: List[SlideModel] = []
