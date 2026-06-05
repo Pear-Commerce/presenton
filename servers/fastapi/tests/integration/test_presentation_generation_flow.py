@@ -496,6 +496,133 @@ def test_strict_layout_preflight_selects_wide_layout_without_generation():
     assert response.layout_catalog_hash
 
 
+def test_strict_layout_preflight_treats_preferred_layouts_as_candidate_set():
+    request = presentation_endpoint.StrictLayoutPreflightRequest(
+        template="general",
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Low-Exposure Strong-Handoff Retailers (continued)",
+                    "",
+                    "Answer: Keep this selected answer on the planned slide.",
+                ]
+            )
+        ],
+        contract_mode="strict",
+        generation_mode="layout_from_contract",
+        content_generation="preserve",
+        generation_contract={},
+        preferred_layout_ids=[["preferred-too-short"]],
+    )
+    layout = PresentationLayoutModel(
+        name="general",
+        ordered=False,
+        slides=[
+            SlideLayoutModel(
+                id="preferred-too-short",
+                name="Preferred Too Short",
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "maxLength": 20,
+                            "default": "Product Overview",
+                        },
+                        "body": {"type": "string", "maxLength": 500},
+                    },
+                },
+            ),
+            SlideLayoutModel(
+                id="nonpreferred-wide",
+                name="Nonpreferred Wide",
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "maxLength": 80},
+                        "body": {"type": "string", "maxLength": 500},
+                    },
+                },
+            ),
+        ],
+    )
+
+    with patch.object(
+        presentation_endpoint,
+        "get_layout_by_name",
+        new=AsyncMock(return_value=layout),
+    ):
+        response = _run(presentation_endpoint.strict_layout_preflight(request))
+
+    assert response.status == "fail"
+    assert response.reason == "strict_layout_preflight_failed"
+    assert response.pinned_layout_ids == []
+    assert response.issues[0]["reason"] == "unbound_visible_schema_default"
+    assert response.issues[0]["expected"] == "Product Overview"
+    assert response.issues[0]["details"]["field_path"] == "title"
+
+
+def test_strict_layout_preflight_rejects_unbound_visible_schema_defaults():
+    request = presentation_endpoint.StrictLayoutPreflightRequest(
+        template="general",
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Executive Answer",
+                    "",
+                    "Question: Which paths need attention?",
+                    "Answer: The selected answer is fully supplied by Pear.",
+                ]
+            )
+        ],
+        contract_mode="strict",
+        generation_mode="layout_from_contract",
+        content_generation="preserve",
+        generation_contract={},
+        preferred_layout_ids=[["quote-slide"]],
+    )
+    layout = PresentationLayoutModel(
+        name="general",
+        ordered=False,
+        slides=[
+            SlideLayoutModel(
+                id="quote-slide",
+                name="Quote",
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        "heading": {
+                            "type": "string",
+                            "maxLength": 60,
+                            "default": "Words of Wisdom",
+                        },
+                        "quote": {"type": "string", "maxLength": 200},
+                        "author": {
+                            "type": "string",
+                            "maxLength": 50,
+                            "default": "Winston Churchill",
+                        },
+                    },
+                },
+            ),
+        ],
+    )
+
+    with patch.object(
+        presentation_endpoint,
+        "get_layout_by_name",
+        new=AsyncMock(return_value=layout),
+    ):
+        response = _run(presentation_endpoint.strict_layout_preflight(request))
+
+    assert response.status == "fail"
+    assert response.reason == "strict_layout_preflight_failed"
+    assert response.pinned_layout_ids == []
+    assert response.issues[0]["reason"] == "unbound_visible_schema_default"
+    assert response.issues[0]["expected"] == "Winston Churchill"
+    assert response.issues[0]["details"]["field_path"] == "author"
+
+
 def test_strict_layout_preflight_returns_structured_text_no_fit_issue():
     body = " ".join(["Prompt 16 preserved answer text"] * 12)
     request = presentation_endpoint.StrictLayoutPreflightRequest(
@@ -1014,6 +1141,123 @@ def test_generate_presentation_handler_rejects_incompatible_pinned_layout_withou
         exc.value.detail["issues"][0]["reason"]
         == "no_compatible_preserved_text_layout"
     )
+    assert fake_async_session.added_all == []
+    generate_structure.assert_not_awaited()
+    get_slide_content.assert_not_awaited()
+
+
+def test_generate_presentation_handler_rejects_pinned_layout_with_unbound_default(
+    fake_async_session,
+):
+    request = GeneratePresentationRequest(
+        content="Create a contract-preserving QBR.",
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Executive Answer",
+                    "",
+                    "Question: Which paths need attention?",
+                    "Answer: The selected answer is fully supplied by Pear.",
+                ]
+            )
+        ],
+        slide_layout_ids=["quote-slide"],
+        language="English",
+        export_as="pdf",
+        template="general",
+        contract_mode="strict",
+        generation_mode="layout_from_contract",
+        content_generation="preserve",
+        generation_contract={},
+    )
+    layout = PresentationLayoutModel(
+        name="general",
+        ordered=False,
+        slides=[
+            SlideLayoutModel(
+                id="quote-slide",
+                name="Quote",
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        "heading": {
+                            "type": "string",
+                            "maxLength": 60,
+                            "default": "Words of Wisdom",
+                        },
+                        "quote": {"type": "string", "maxLength": 200},
+                        "author": {
+                            "type": "string",
+                            "maxLength": 50,
+                            "default": "Winston Churchill",
+                        },
+                    },
+                },
+            ),
+        ],
+    )
+    generate_structure = AsyncMock(
+        side_effect=AssertionError("pinned layout ids must skip structure LLM")
+    )
+    get_slide_content = AsyncMock(
+        side_effect=AssertionError("strict preserve must not call slide content LLM")
+    )
+
+    with patch.object(
+        presentation_endpoint.MEM0_PRESENTATION_MEMORY_SERVICE,
+        "store_generation_context",
+        new=AsyncMock(),
+    ), patch.object(
+        presentation_endpoint.MEM0_PRESENTATION_MEMORY_SERVICE,
+        "store_generated_outlines",
+        new=AsyncMock(),
+    ), patch.object(
+        presentation_endpoint,
+        "get_layout_by_name",
+        new=AsyncMock(return_value=layout),
+    ), patch.object(
+        presentation_endpoint,
+        "generate_presentation_structure",
+        new=generate_structure,
+    ), patch.object(
+        presentation_endpoint,
+        "get_slide_content_from_type_and_outline",
+        get_slide_content,
+    ), patch.object(
+        presentation_endpoint,
+        "process_slide_and_fetch_assets",
+        new=AsyncMock(return_value=[]),
+    ), patch.object(
+        presentation_endpoint,
+        "get_images_directory",
+        return_value="/tmp",
+    ), patch.object(
+        presentation_endpoint,
+        "ImageGenerationService",
+        return_value=Mock(),
+    ), patch.object(
+        presentation_endpoint.CONCURRENT_SERVICE,
+        "run_task",
+        new=Mock(),
+    ), patch.object(
+        presentation_endpoint,
+        "random",
+        new=Mock(randint=Mock(return_value=0)),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            _run(
+                presentation_endpoint.generate_presentation_handler(
+                    request=request,
+                    presentation_id=uuid.uuid4(),
+                    async_status=None,
+                    sql_session=fake_async_session,
+                )
+            )
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail["reason"] == "generation_contract_violation"
+    assert exc.value.detail["issues"][0]["reason"] == "unbound_visible_schema_default"
+    assert exc.value.detail["issues"][0]["expected"] == "Winston Churchill"
     assert fake_async_session.added_all == []
     generate_structure.assert_not_awaited()
     get_slide_content.assert_not_awaited()

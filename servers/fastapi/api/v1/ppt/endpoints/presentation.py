@@ -261,6 +261,9 @@ def _ordered_preflight_candidate_indexes(
         seen.add(layout_index)
         indexes.append(layout_index)
 
+    if preferred_ids:
+        return indexes
+
     for layout_index in range(len(layout.slides)):
         if layout_index in seen:
             continue

@@ -846,6 +846,63 @@ def _set_path(target: dict, path: list[str], value: Any) -> None:
         target.update(value)
 
 
+def _visible_schema_text_defaults(slide_schema: dict) -> list[tuple[list[str], str]]:
+    defaults: list[tuple[list[str], str]] = []
+    for path, _ in _schema_text_paths(slide_schema):
+        schema = _schema_at_path(slide_schema, path)
+        default = schema.get("default") if isinstance(schema, dict) else None
+        if isinstance(default, str) and _clean_text(default):
+            defaults.append((path, _clean_text(default)))
+    return defaults
+
+
+def _source_text_for_slide(state: GenerationContractState, slide_index: int) -> str:
+    section = state.sections[slide_index] if slide_index < len(state.sections) else None
+    parts = [
+        section.markdown if section else "",
+        *state.locked_text,
+        *state.exact_terms,
+    ]
+    return "\n".join(part for part in parts if part)
+
+
+def _unbound_visible_schema_default_issues(
+    slide_schema: dict,
+    state: GenerationContractState,
+    slide_index: int,
+    content: dict,
+) -> list[ContractIssue]:
+    if not state.enabled:
+        return []
+
+    source_text = _source_text_for_slide(state, slide_index)
+    issues: list[ContractIssue] = []
+    for path, default in _visible_schema_text_defaults(slide_schema):
+        if _get_path(content, path) not in (None, ""):
+            continue
+        if _norm(default) and _norm(default) in _norm(source_text):
+            continue
+        issues.append(
+            ContractIssue(
+                reason="unbound_visible_schema_default",
+                message=(
+                    "Selected layout would render visible schema default text "
+                    "that is not present in the strict source content."
+                ),
+                stage="slide_content",
+                section_index=slide_index + 1,
+                expected=default,
+                details={
+                    "issue_code": "STRICT_LAYOUT_VISIBLE_DEFAULT_UNBOUND",
+                    "slide_index": slide_index,
+                    "section_index": slide_index + 1,
+                    "field_path": _field_path(path),
+                },
+            )
+        )
+    return issues
+
+
 def _max_table_cells_per_row(table: ContractTable) -> int:
     return max([table.column_count, *(len(row) for row in table.rows)], default=0)
 
@@ -1444,6 +1501,14 @@ def build_preserved_slide_content(
         slide_index,
     )
     issues.extend([*table_issues, *text_issues])
+    issues.extend(
+        _unbound_visible_schema_default_issues(
+            slide_schema,
+            state,
+            slide_index,
+            content,
+        )
+    )
     return content, issues
 
 
@@ -1540,7 +1605,13 @@ def contract_layout_issues_for_schema(
         state,
         slide_index,
     )
-    return [*preserved_text_issues, *table_issues, *text_issues]
+    default_issues = _unbound_visible_schema_default_issues(
+        slide_schema,
+        state,
+        slide_index,
+        content,
+    )
+    return [*preserved_text_issues, *table_issues, *text_issues, *default_issues]
 
 
 def overlay_contract_tables(
