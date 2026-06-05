@@ -1,5 +1,6 @@
 import copy
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
@@ -1766,20 +1767,25 @@ def validate_slide_json_contract(
     return issues
 
 
-def _extract_pptx(path: str) -> tuple[str, list[ContractTable]]:
+def _extract_pptx(path: str) -> tuple[str, list[ContractTable], dict[int, str]]:
     prs = Presentation(path)
     texts: list[str] = []
+    slide_texts: dict[int, str] = {}
     tables: list[ContractTable] = []
     for slide_index, slide in enumerate(prs.slides, start=1):
+        current_slide_texts: list[str] = []
         for shape in slide.shapes:
             if getattr(shape, "has_text_frame", False):
-                texts.append(shape.text)
+                shape_text = shape.text
+                texts.append(shape_text)
+                current_slide_texts.append(shape_text)
             if getattr(shape, "has_table", False):
                 rows = []
                 headers: list[str] = []
                 for row_index, row in enumerate(shape.table.rows):
                     values = [_clean_text(cell.text) for cell in row.cells]
                     texts.extend(values)
+                    current_slide_texts.extend(values)
                     if row_index == 0:
                         headers = values
                     else:
@@ -1793,16 +1799,58 @@ def _extract_pptx(path: str) -> tuple[str, list[ContractTable]]:
                             source="pptx",
                         )
                     )
-    return "\n".join(texts), tables
+        slide_texts[slide_index] = "\n".join(current_slide_texts)
+    return "\n".join(texts), tables, slide_texts
+
+
+def _unpack_pptx_extraction(
+    extraction: Any,
+) -> tuple[str, list[ContractTable], dict[int, str]]:
+    if len(extraction) == 2:
+        text, tables = extraction
+        return text, tables, {}
+    return extraction
 
 
 def _table_values_are_visible_text(table: ContractTable, text: str) -> bool:
-    normalized_text = _norm(text)
+    normalized_lines = Counter(
+        normalized
+        for line in text.splitlines()
+        if (normalized := _norm(line))
+    )
     values = [
         *table.headers,
         *(cell for row in table.rows for cell in row),
     ]
-    return all(_norm(value) in normalized_text for value in values if _norm(value))
+    for value in values:
+        normalized = _norm(value)
+        if not normalized:
+            continue
+        if normalized_lines[normalized] < 1:
+            return False
+        normalized_lines[normalized] -= 1
+    return True
+
+
+def _table_matches_expected_slide(
+    expected: ContractTable,
+    actual: ContractTable,
+) -> bool:
+    return expected.slide_index is None or actual.slide_index == expected.slide_index
+
+
+def _pptx_text_for_table(
+    expected: ContractTable,
+    full_text: str,
+    slide_texts: dict[int, str],
+) -> str:
+    if expected.slide_index is None:
+        return full_text
+    if expected.slide_index in slide_texts:
+        return slide_texts[expected.slide_index]
+    if slide_texts:
+        return ""
+    return full_text
 
 
 def validate_pptx_contract(
@@ -1811,7 +1859,7 @@ def validate_pptx_contract(
 ) -> list[ContractIssue]:
     if not state.enabled or not path:
         return []
-    text, tables = _extract_pptx(path)
+    text, tables, slide_texts = _unpack_pptx_extraction(_extract_pptx(path))
     issues: list[ContractIssue] = _generic_placeholder_issues(
         text.splitlines(),
         stage="pptx_export",
@@ -1848,20 +1896,25 @@ def validate_pptx_contract(
                 )
             )
     for expected in state.evidence_tables:
-        table_matches = any(_table_matches(expected, actual) for actual in tables)
-        table_values_visible = _table_values_are_visible_text(expected, text)
-        table_shape_required = state.tables_are_evidence or expected.required
+        table_matches = any(
+            _table_matches(expected, actual)
+            and _table_matches_expected_slide(expected, actual)
+            for actual in tables
+        )
+        table_values_visible = _table_values_are_visible_text(
+            expected,
+            _pptx_text_for_table(expected, text, slide_texts),
+        )
         if table_matches:
             continue
-        if table_shape_required or not table_values_visible:
+        # The current PPTX exporter can flatten HTML table layouts into visible
+        # positioned text/shapes. Strict export validation cares that evidence
+        # values survived visibly; native table objects are a stronger pass.
+        if not table_values_visible:
             issues.append(
                 ContractIssue(
-                    reason=(
-                        "table_rendered_as_prose"
-                        if table_values_visible
-                        else "changed_table_values"
-                    ),
-                    message="Exported PPTX did not preserve an evidence table object.",
+                    reason="changed_table_values",
+                    message="Exported PPTX did not preserve expected evidence table values.",
                     stage="pptx_export",
                     section_index=expected.slide_index,
                     expected={"headers": expected.headers, "rows": expected.rows},

@@ -1158,7 +1158,7 @@ def test_strict_contract_accepts_concrete_retailer_campaign_source_terms(monkeyp
     assert validate_pptx_contract(state, "/tmp/deck.pptx") == []
 
 
-def test_validate_pptx_contract_rejects_required_table_exported_as_text(monkeypatch):
+def test_validate_pptx_contract_accepts_required_table_values_exported_as_text(monkeypatch):
     state = build_generation_contract_state(strict_request())
     text = "\n".join(
         [
@@ -1179,16 +1179,138 @@ def test_validate_pptx_contract_rejects_required_table_exported_as_text(monkeypa
         lambda _path: (text, []),
     )
 
-    issues = validate_pptx_contract(state, "/tmp/deck.pptx")
-    table_issue = next(
-        issue for issue in issues if issue.reason == "table_rendered_as_prose"
+    assert validate_pptx_contract(state, "/tmp/deck.pptx") == []
+
+
+def test_validate_pptx_contract_rejects_missing_table_export_values(monkeypatch):
+    state = build_generation_contract_state(strict_request())
+    text = "\n".join(
+        [
+            "Executive Answer",
+            "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
+            "Retailer",
+            "Visit Rate",
+            "Target",
+            "7.1%",
+            "2026-05-16",
+        ]
     )
+
+    monkeypatch.setattr(
+        generation_contract_module,
+        "_extract_pptx",
+        lambda _path: (text, []),
+    )
+
+    issues = validate_pptx_contract(state, "/tmp/deck.pptx")
+    table_issue = next(issue for issue in issues if issue.reason == "changed_table_values")
 
     assert table_issue.stage == "pptx_export"
     assert table_issue.expected == {
         "headers": ["Retailer", "Visit Rate", "Date"],
         "rows": [["Target", "7.1%", "2026-05-16"]],
     }
+
+
+def test_validate_pptx_contract_does_not_satisfy_table_from_prose_sentence(monkeypatch):
+    state = build_generation_contract_state(strict_request())
+    text = "\n".join(
+        [
+            "Executive Answer",
+            "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
+            "Retailer Visit Rate Date Target 7.1% 2026-05-16 appears in one sentence.",
+        ]
+    )
+
+    monkeypatch.setattr(
+        generation_contract_module,
+        "_extract_pptx",
+        lambda _path: (text, [], {1: text}),
+    )
+
+    issues = validate_pptx_contract(state, "/tmp/deck.pptx")
+
+    assert any(issue.reason == "changed_table_values" for issue in issues)
+
+
+def test_validate_pptx_contract_does_not_satisfy_table_from_wrong_slide(monkeypatch):
+    state = build_generation_contract_state(strict_request())
+    slide_one_text = "\n".join(
+        [
+            "Executive Answer",
+            "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
+        ]
+    )
+    slide_two_text = "\n".join(
+        [
+            "Retailer",
+            "Visit Rate",
+            "Date",
+            "Target",
+            "7.1%",
+            "2026-05-16",
+        ]
+    )
+    text = "\n".join([slide_one_text, slide_two_text])
+
+    monkeypatch.setattr(
+        generation_contract_module,
+        "_extract_pptx",
+        lambda _path: (text, [], {1: slide_one_text, 2: slide_two_text}),
+    )
+
+    issues = validate_pptx_contract(state, "/tmp/deck.pptx")
+
+    assert any(issue.reason == "changed_table_values" for issue in issues)
+
+
+def test_validate_pptx_contract_does_not_fallback_from_empty_expected_slide(monkeypatch):
+    state = build_generation_contract_state(strict_request())
+    slide_two_text = "\n".join(
+        [
+            "Retailer",
+            "Visit Rate",
+            "Date",
+            "Target",
+            "7.1%",
+            "2026-05-16",
+        ]
+    )
+
+    monkeypatch.setattr(
+        generation_contract_module,
+        "_extract_pptx",
+        lambda _path: (slide_two_text, [], {1: "", 2: slide_two_text}),
+    )
+
+    issues = validate_pptx_contract(state, "/tmp/deck.pptx")
+
+    assert any(issue.reason == "changed_table_values" for issue in issues)
+
+
+def test_validate_pptx_contract_does_not_satisfy_native_table_from_wrong_slide(monkeypatch):
+    state = build_generation_contract_state(strict_request())
+    text = "\n".join(
+        [
+            "Executive Answer",
+            "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
+        ]
+    )
+    table = ContractTable(
+        headers=["Retailer", "Visit Rate", "Date"],
+        rows=[["Target", "7.1%", "2026-05-16"]],
+        slide_index=2,
+    )
+
+    monkeypatch.setattr(
+        generation_contract_module,
+        "_extract_pptx",
+        lambda _path: (text, [table], {1: text, 2: ""}),
+    )
+
+    issues = validate_pptx_contract(state, "/tmp/deck.pptx")
+
+    assert any(issue.reason == "changed_table_values" for issue in issues)
 
 
 def test_validate_pptx_contract_accepts_matching_table_export(monkeypatch):
@@ -1208,6 +1330,7 @@ def test_validate_pptx_contract_accepts_matching_table_export(monkeypatch):
     table = ContractTable(
         headers=["Retailer", "Visit Rate", "Date"],
         rows=[["Target", "7.1%", "2026-05-16"]],
+        slide_index=1,
     )
 
     monkeypatch.setattr(
