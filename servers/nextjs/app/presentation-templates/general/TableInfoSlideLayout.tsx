@@ -179,63 +179,52 @@ const TableInfoSlideLayout: React.FC<TableInfoSlideLayoutProps> = ({
                 }}
                 className="bg-white rounded-lg shadow-lg border overflow-hidden"
               >
-                {/* Table Header */}
-                <div
-                  style={{ backgroundColor: "var(--primary-color,#9333ea)" }}
-                >
-                  <div
-                    className="grid gap-px"
-                    style={{
-                      gridTemplateColumns: `repeat(${tableHeaders.length}, 1fr)`,
-                    }}
+                <table className="w-full table-fixed border-separate border-spacing-0">
+                  <thead
+                    style={{ backgroundColor: "var(--primary-color,#9333ea)" }}
                   >
-                    {tableHeaders.map((header, index) => (
-                      <div
-                        key={index}
-                        className="px-6 py-4 font-semibold text-center text-sm sm:text-base"
-                        style={{ color: "var(--primary-text,#ffffff)" }}
+                    <tr>
+                      {tableHeaders.map((header, index) => (
+                        <th
+                          key={index}
+                          scope="col"
+                          className="px-6 py-4 font-semibold text-center text-sm sm:text-base align-middle"
+                          style={{ color: "var(--primary-text,#ffffff)" }}
+                        >
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tableRows.map((row, rowIndex) => (
+                      <tr
+                        key={rowIndex}
+                        className="transition-colors duration-200"
                       >
-                        {header}
-                      </div>
+                        {Array.from(
+                          { length: tableHeaders.length },
+                          (_, cellIndex) => (
+                            <td
+                              key={cellIndex}
+                              className="px-6 py-4 text-center text-sm sm:text-base align-middle border-t"
+                              style={{
+                                borderColor: "var(--stroke, #e5e7eb)",
+                                color: "var(--background-text,#4b5563)",
+                                background:
+                                  cellIndex % 2 === 0
+                                    ? "var(--card-color, #e5e7eb)"
+                                    : "var(--card-color, #f3f4f6)",
+                              }}
+                            >
+                              {row[cellIndex] || ""}
+                            </td>
+                          )
+                        )}
+                      </tr>
                     ))}
-                  </div>
-                </div>
-
-                {/* Table Body */}
-                <div
-                  className="divide-y divide-gray-200 "
-                  // style={{ borderColor: "var(--stroke, #e5e7eb)" }}
-                >
-                  {tableRows.map((row, rowIndex) => (
-                    <div
-                      key={rowIndex}
-                      className={`grid gap-px border-r   transition-colors duration-200`}
-                      style={{
-                        gridTemplateColumns: `repeat(${tableHeaders.length}, 1fr)`,
-                        borderColor: "var(--stroke, #e5e7eb)",
-                        backgroundColor: "var(--card-color, #e5e7eb)",
-                      }}
-                    >
-                      {row
-                        .slice(0, tableHeaders.length)
-                        .map((cell, cellIndex) => (
-                          <div
-                            key={cellIndex}
-                            className="px-6 py-4 text-center text-sm sm:text-base"
-                            style={{
-                              color: "var(--background-text,#4b5563)",
-                              background:
-                                cellIndex % 2 === 0
-                                  ? "var(--card-color, #e5e7eb)"
-                                  : "var(--card-color, #f3f4f6)",
-                            }}
-                          >
-                            {cell}
-                          </div>
-                        ))}
-                    </div>
-                  ))}
-                </div>
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
