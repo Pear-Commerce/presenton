@@ -6,6 +6,7 @@ from utils import generation_contract as generation_contract_module
 from models.generate_presentation_request import GeneratePresentationRequest
 from models.api_error_model import APIErrorModel
 from utils.generation_contract import (
+    ContractIssue,
     ContractTable,
     build_preserved_slide_content,
     build_generation_contract_state,
@@ -66,6 +67,146 @@ def test_strict_contract_request_accepts_new_api_fields():
     assert len(state.sections) == 1
     assert state.sections[0].title == "Executive Answer"
     assert state.evidence_tables[0].headers == ["Retailer", "Visit Rate", "Date"]
+    assert state.evidence_tables[0].binding_kind == "markdown_source"
+    assert state.evidence_tables[0].hard_table_binding is True
+
+
+def test_explicit_required_table_rendered_as_prose_is_error():
+    request = strict_request(
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Executive Answer",
+                    "",
+                    "Retailer Target Visit Rate 7.1% Date 2026-05-16.",
+                ]
+            )
+        ],
+        generation_contract={
+            "locked_text": [],
+            "evidence_tables": [
+                {
+                    "slide_index": 1,
+                    "headers": ["Retailer", "Visit Rate", "Date"],
+                    "rows": [["Target", "7.1%", "2026-05-16"]],
+                    "required": True,
+                }
+            ],
+            "tables_are_evidence": False,
+        },
+    )
+    state = build_generation_contract_state(request)
+
+    issues = validate_slide_json_contract(
+        state,
+        [
+            {
+                "title": "Executive Answer",
+                "body": "Retailer Target Visit Rate 7.1% Date 2026-05-16.",
+            }
+        ],
+    )
+    table_issue = next(issue for issue in issues if issue.reason == "table_rendered_as_prose")
+
+    assert table_issue.severity == "error"
+    assert table_issue.category == "strict_table_shape"
+    assert table_issue.details["binding_kind"] == "explicit_contract"
+    assert table_issue.details["required_table_binding"] is True
+
+
+def test_optional_markdown_table_rendered_as_prose_is_warning_only():
+    request = strict_request(
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Executive Answer",
+                    "",
+                    "| Retailer | Visit Rate | Date |",
+                    "| --- | --- | --- |",
+                    "| Target | 7.1% | 2026-05-16 |",
+                ]
+            )
+        ],
+        generation_contract={
+            "locked_text": [],
+            "tables_are_evidence": False,
+        },
+    )
+    state = build_generation_contract_state(request)
+
+    issues = validate_slide_json_contract(
+        state,
+        [
+            {
+                "title": "Executive Answer",
+                "body": "Retailer Visit Rate Date Target 7.1% 2026-05-16",
+            }
+        ],
+    )
+    table_issue = next(issue for issue in issues if issue.reason == "table_rendered_as_prose")
+
+    assert table_issue.severity == "warning"
+    assert table_issue.details["binding_kind"] == "markdown_source"
+    assert table_issue.details["required_table_binding"] is False
+
+
+def test_pipe_like_prose_without_markdown_table_has_no_table_shape_issue():
+    request = strict_request(
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Executive Answer",
+                    "",
+                    "Question: Walmart | Target | who led?",
+                    "Answer: Target led the supplied comparison.",
+                ]
+            )
+        ],
+        generation_contract={"locked_text": [], "tables_are_evidence": False},
+    )
+    state = build_generation_contract_state(request)
+
+    issues = validate_slide_json_contract(
+        state,
+        [
+            {
+                "title": "Executive Answer",
+                "body": "Question: Walmart | Target | who led?\nAnswer: Target led the supplied comparison.",
+            }
+        ],
+    )
+
+    assert all(
+        issue.reason not in {"table_rendered_as_prose", "changed_table_values"}
+        for issue in issues
+    )
+
+
+def test_optional_markdown_table_with_dropped_values_is_error():
+    request = strict_request(
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Executive Answer",
+                    "",
+                    "| Retailer | Visit Rate | Date |",
+                    "| --- | --- | --- |",
+                    "| Target | 7.1% | 2026-05-16 |",
+                ]
+            )
+        ],
+        generation_contract={"locked_text": [], "tables_are_evidence": False},
+    )
+    state = build_generation_contract_state(request)
+
+    issues = validate_slide_json_contract(
+        state,
+        [{"title": "Executive Answer", "body": "Target had a 7.1% visit rate."}],
+    )
+    table_issue = next(issue for issue in issues if issue.reason == "changed_table_values")
+
+    assert table_issue.severity == "error"
+    assert table_issue.details["required_table_binding"] is False
 
 
 def test_strict_contract_dedupes_same_slide_table_from_contract_and_markdown():
@@ -599,6 +740,94 @@ def test_build_preserved_slide_content_copies_title_text_and_table():
     assert content["tableData"]["rows"] == [["Target", "7.1%", "2026-05-16"]]
 
 
+def test_build_preserved_slide_content_rejects_nested_unbound_table_defaults():
+    request = strict_request(
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Executive Answer",
+                    "",
+                    "Answer: The selected answer is fully supplied by Pear.",
+                ]
+            )
+        ],
+        generation_contract={"locked_text": [], "tables_are_evidence": False},
+    )
+    state = build_generation_contract_state(request)
+    schema = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "maxLength": 80},
+            "body": {"type": "string", "maxLength": 300},
+            "tableData": {
+                "type": "object",
+                "default": {
+                    "headers": ["Company", "Revenue"],
+                    "rows": [["Company A", "$2.5M"], ["Our Company", "$1.2M"]],
+                },
+                "properties": {
+                    "headers": {"type": "array", "maxItems": 4},
+                    "rows": {"type": "array", "maxItems": 4},
+                },
+            },
+        },
+    }
+
+    content, issues = build_preserved_slide_content(schema, state, 0)
+    default_issue = next(
+        issue for issue in issues if issue.reason == "unbound_visible_schema_default"
+    )
+
+    assert content["title"] == "Executive Answer"
+    assert default_issue.category == "strict_default_leakage"
+    assert default_issue.expected in {"Company", "Company A", "Our Company", "$2.5M", "$1.2M"}
+    assert default_issue.details["issue_code"] == "STRICT_LAYOUT_VISIBLE_DEFAULT_UNBOUND"
+    assert default_issue.details["field_path"] == "tableData"
+    assert default_issue.details["default_path"].startswith("tableData.")
+    assert default_issue.details["default_kind"] == "object"
+
+
+def test_bound_table_data_suppresses_nested_default_leakage():
+    request = strict_request(
+        generation_contract={
+            "locked_text": [],
+            "evidence_tables": [
+                {
+                    "slide_index": 1,
+                    "headers": ["Retailer", "Visit Rate", "Date"],
+                    "rows": [["Target", "7.1%", "2026-05-16"]],
+                }
+            ],
+            "tables_are_evidence": True,
+        }
+    )
+    state = build_generation_contract_state(request)
+    schema = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "maxLength": 80},
+            "body": {"type": "string", "maxLength": 300},
+            "tableData": {
+                "type": "object",
+                "default": {
+                    "headers": ["Company", "Revenue"],
+                    "rows": [["Company A", "$2.5M"], ["Our Company", "$1.2M"]],
+                },
+                "properties": {
+                    "headers": {"type": "array", "maxItems": 4},
+                    "rows": {"type": "array", "maxItems": 4},
+                },
+            },
+        },
+    }
+
+    content, issues = build_preserved_slide_content(schema, state, 0)
+
+    assert issues == []
+    assert content["tableData"]["headers"] == ["Retailer", "Visit Rate", "Date"]
+    assert content["tableData"]["rows"] == [["Target", "7.1%", "2026-05-16"]]
+
+
 def test_build_preserved_slide_content_keeps_prose_between_locked_blocks():
     locked_a = "Locked A: Target led the supplied comparison."
     visible_prose = "Visible prose between locked lines must remain visible."
@@ -684,6 +913,40 @@ def test_build_preserved_slide_content_preserves_pipe_delimited_prose():
     assert "Retailer | Visit Rate | Date" not in content["body"]
     assert content["tableData"]["headers"] == ["Retailer", "Visit Rate", "Date"]
     assert content["tableData"]["rows"] == [["Target", "7.1%", "2026-05-16"]]
+
+
+def test_build_preserved_slide_content_keeps_optional_markdown_table_in_body_without_table_slot():
+    request = strict_request(
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Executive Answer",
+                    "",
+                    "Answer: Target led the supplied comparison.",
+                    "",
+                    "| Retailer | Visit Rate | Date |",
+                    "| --- | --- | --- |",
+                    "| Target | 7.1% | 2026-05-16 |",
+                ]
+            )
+        ],
+        generation_contract={"locked_text": [], "tables_are_evidence": False},
+    )
+    state = build_generation_contract_state(request)
+    schema = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "maxLength": 80},
+            "body": {"type": "string", "maxLength": 500},
+        },
+    }
+
+    content, issues = build_preserved_slide_content(schema, state, 0)
+
+    assert issues == []
+    assert "Answer: Target led the supplied comparison." in content["body"]
+    assert "| Retailer | Visit Rate | Date |" in content["body"]
+    assert "| Target | 7.1% | 2026-05-16 |" in content["body"]
 
 
 def test_build_preserved_slide_content_preserves_body_subheadings():
@@ -1613,6 +1876,47 @@ def test_strict_contract_fail_policy_raises_structured_diagnostics():
         assert exc.detail["issues"][0]["reason"] == "extra_slide"
     else:
         raise AssertionError("Expected strict contract violation to fail")
+
+
+def test_enforce_contract_logs_warning_only_issues_without_raising(capsys):
+    state = build_generation_contract_state(strict_request())
+    warning = ContractIssue(
+        reason="table_rendered_as_prose",
+        severity="warning",
+        message="Source markdown table rendered visibly as prose.",
+        stage="slide_content",
+        category="strict_table_shape",
+    )
+
+    enforce_contract_or_raise(state, [warning], stage="slide_content")
+
+    captured = capsys.readouterr()
+    assert "generation_contract" in captured.out
+    assert "table_rendered_as_prose" in captured.out
+
+
+def test_enforce_contract_raises_errors_and_preserves_warnings():
+    state = build_generation_contract_state(strict_request())
+    warning = ContractIssue(
+        reason="table_rendered_as_prose",
+        severity="warning",
+        message="Source markdown table rendered visibly as prose.",
+        stage="slide_content",
+    )
+    error = ContractIssue(
+        reason="changed_table_values",
+        message="Expected table values were not preserved visibly.",
+        stage="slide_content",
+    )
+
+    try:
+        enforce_contract_or_raise(state, [warning, error], stage="slide_content")
+    except HTTPException as exc:
+        assert exc.status_code == 422
+        assert exc.detail["issues"][0]["reason"] == "changed_table_values"
+        assert exc.detail["warnings"][0]["reason"] == "table_rendered_as_prose"
+    else:
+        raise AssertionError("Expected strict contract error to fail")
 
 
 def test_api_error_model_accepts_structured_http_exception_detail():

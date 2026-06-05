@@ -140,6 +140,7 @@ class StrictLayoutPreflightResponse(BaseModel):
     pinned_layout_ids: List[str] = Field(default_factory=list)
     slides: List[StrictLayoutPreflightSlide] = Field(default_factory=list)
     issues: List[dict[str, Any]] = Field(default_factory=list)
+    warnings: List[dict[str, Any]] = Field(default_factory=list)
 
 
 def _layout_catalog_hash(layout: PresentationLayoutModel) -> str:
@@ -406,6 +407,7 @@ async def strict_layout_preflight(
     response_slides: list[StrictLayoutPreflightSlide] = []
     pinned_layout_ids: list[str] = []
     failure_issues: list[ContractIssue] = []
+    warning_issues: list[ContractIssue] = []
 
     for slide_index in range(slide_count):
         candidate_indexes = (
@@ -429,9 +431,15 @@ async def strict_layout_preflight(
                 slide_index,
                 preserve_markdown=True,
             )
-            if candidate_issues and not first_candidate_issues:
-                first_candidate_issues = candidate_issues
-            if not candidate_issues:
+            candidate_errors = [
+                issue for issue in candidate_issues if issue.severity != "warning"
+            ]
+            if candidate_errors and not first_candidate_issues:
+                first_candidate_issues = candidate_errors
+            if not candidate_errors:
+                warning_issues.extend(
+                    issue for issue in candidate_issues if issue.severity == "warning"
+                )
                 selected_index = candidate_index
                 break
 
@@ -465,8 +473,14 @@ async def strict_layout_preflight(
             contract_state,
             slide_index,
         )
-        if content_issues:
-            failure_issues.extend(content_issues)
+        content_errors = [
+            issue for issue in content_issues if issue.severity != "warning"
+        ]
+        warning_issues.extend(
+            issue for issue in content_issues if issue.severity == "warning"
+        )
+        if content_errors:
+            failure_issues.extend(content_errors)
             continue
 
         pinned_layout_ids.append(selected_layout.id)
@@ -491,7 +505,17 @@ async def strict_layout_preflight(
             pinned_layout_ids=pinned_layout_ids,
             slides=response_slides,
             issues=_contract_issue_dicts(failure_issues),
+            warnings=_contract_issue_dicts(warning_issues),
         )
+
+    warning_issues.extend(
+        issue
+        for issue in validate_slide_json_contract(
+            contract_state,
+            [slide.content_preview for slide in response_slides],
+        )
+        if issue.severity == "warning"
+    )
 
     return StrictLayoutPreflightResponse(
         status="pass",
@@ -501,6 +525,7 @@ async def strict_layout_preflight(
         pinned_layout_ids=pinned_layout_ids,
         slides=response_slides,
         issues=[],
+        warnings=_contract_issue_dicts(warning_issues),
     )
 
 

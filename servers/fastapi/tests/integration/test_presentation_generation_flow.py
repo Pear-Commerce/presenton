@@ -623,6 +623,146 @@ def test_strict_layout_preflight_rejects_unbound_visible_schema_defaults():
     assert response.issues[0]["details"]["field_path"] == "author"
 
 
+def test_strict_layout_preflight_rejects_nested_unbound_table_defaults():
+    request = presentation_endpoint.StrictLayoutPreflightRequest(
+        template="general",
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Executive Answer",
+                    "",
+                    "Question: Which paths need attention?",
+                    "Answer: The selected answer is fully supplied by Pear.",
+                ]
+            )
+        ],
+        contract_mode="strict",
+        generation_mode="layout_from_contract",
+        content_generation="preserve",
+        generation_contract={},
+        preferred_layout_ids=[["table-info-slide"]],
+    )
+    layout = PresentationLayoutModel(
+        name="general",
+        ordered=False,
+        slides=[
+            SlideLayoutModel(
+                id="table-info-slide",
+                name="Table With Info",
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "maxLength": 80},
+                        "description": {"type": "string", "maxLength": 300},
+                        "tableData": {
+                            "type": "object",
+                            "default": {
+                                "headers": ["Company", "Revenue", "Growth"],
+                                "rows": [
+                                    ["Company A", "$2.5M", "15%"],
+                                    ["Our Company", "$1.2M", "35%"],
+                                ],
+                            },
+                            "properties": {
+                                "headers": {"type": "array", "maxItems": 5},
+                                "rows": {"type": "array", "maxItems": 6},
+                            },
+                        },
+                    },
+                },
+            ),
+        ],
+    )
+
+    with patch.object(
+        presentation_endpoint,
+        "get_layout_by_name",
+        new=AsyncMock(return_value=layout),
+    ):
+        response = _run(presentation_endpoint.strict_layout_preflight(request))
+
+    assert response.status == "fail"
+    assert response.reason == "strict_layout_preflight_failed"
+    assert response.pinned_layout_ids == []
+    assert response.issues[0]["reason"] == "unbound_visible_schema_default"
+    assert response.issues[0]["category"] == "strict_default_leakage"
+    assert response.issues[0]["expected"] in {
+        "Company",
+        "Company A",
+        "Our Company",
+        "$2.5M",
+        "$1.2M",
+    }
+    assert response.issues[0]["details"]["field_path"] == "tableData"
+    assert response.issues[0]["details"]["default_kind"] == "object"
+
+
+def test_strict_layout_preflight_allows_nested_table_defaults_when_table_is_bound():
+    request = presentation_endpoint.StrictLayoutPreflightRequest(
+        template="general",
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Evidence Table",
+                    "",
+                    "| Retailer | Visit Rate | Date |",
+                    "| --- | --- | --- |",
+                    "| Target | 7.1% | 2026-05-16 |",
+                ]
+            )
+        ],
+        contract_mode="strict",
+        generation_mode="layout_from_contract",
+        content_generation="preserve",
+        generation_contract={"tables_are_evidence": True},
+        preferred_layout_ids=[["table-info-slide"]],
+    )
+    layout = PresentationLayoutModel(
+        name="general",
+        ordered=False,
+        slides=[
+            SlideLayoutModel(
+                id="table-info-slide",
+                name="Table With Info",
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "maxLength": 80},
+                        "description": {"type": "string", "maxLength": 300},
+                        "tableData": {
+                            "type": "object",
+                            "default": {
+                                "headers": ["Company", "Revenue", "Growth"],
+                                "rows": [["Company A", "$2.5M", "15%"]],
+                            },
+                            "properties": {
+                                "headers": {"type": "array", "maxItems": 5},
+                                "rows": {"type": "array", "maxItems": 6},
+                            },
+                        },
+                    },
+                },
+            ),
+        ],
+    )
+
+    with patch.object(
+        presentation_endpoint,
+        "get_layout_by_name",
+        new=AsyncMock(return_value=layout),
+    ):
+        response = _run(presentation_endpoint.strict_layout_preflight(request))
+
+    assert response.status == "pass"
+    assert response.pinned_layout_ids == ["table-info-slide"]
+    assert response.slides[0].content_preview["tableData"]["headers"] == [
+        "Retailer",
+        "Visit Rate",
+        "Date",
+    ]
+    assert response.warnings == []
+
+
 def test_strict_layout_preflight_returns_structured_text_no_fit_issue():
     body = " ".join(["Prompt 16 preserved answer text"] * 12)
     request = presentation_endpoint.StrictLayoutPreflightRequest(
@@ -1260,6 +1400,256 @@ def test_generate_presentation_handler_rejects_pinned_layout_with_unbound_defaul
     assert exc.value.detail["issues"][0]["expected"] == "Winston Churchill"
     assert fake_async_session.added_all == []
     generate_structure.assert_not_awaited()
+    get_slide_content.assert_not_awaited()
+
+
+def test_generate_presentation_handler_rejects_pinned_layout_with_nested_table_default(
+    fake_async_session,
+):
+    request = GeneratePresentationRequest(
+        content="Create a contract-preserving QBR.",
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Executive Answer",
+                    "",
+                    "Question: Which paths need attention?",
+                    "Answer: The selected answer is fully supplied by Pear.",
+                ]
+            )
+        ],
+        slide_layout_ids=["table-info-slide"],
+        language="English",
+        export_as="pdf",
+        template="general",
+        contract_mode="strict",
+        generation_mode="layout_from_contract",
+        content_generation="preserve",
+        generation_contract={},
+    )
+    layout = PresentationLayoutModel(
+        name="general",
+        ordered=False,
+        slides=[
+            SlideLayoutModel(
+                id="table-info-slide",
+                name="Table With Info",
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "maxLength": 80},
+                        "description": {"type": "string", "maxLength": 300},
+                        "tableData": {
+                            "type": "object",
+                            "default": {
+                                "headers": ["Company", "Revenue"],
+                                "rows": [["Company A", "$2.5M"]],
+                            },
+                            "properties": {
+                                "headers": {"type": "array", "maxItems": 5},
+                                "rows": {"type": "array", "maxItems": 6},
+                            },
+                        },
+                    },
+                },
+            ),
+        ],
+    )
+    generate_structure = AsyncMock(
+        side_effect=AssertionError("pinned layout ids must skip structure LLM")
+    )
+    get_slide_content = AsyncMock(
+        side_effect=AssertionError("strict preserve must not call slide content LLM")
+    )
+
+    with patch.object(
+        presentation_endpoint.MEM0_PRESENTATION_MEMORY_SERVICE,
+        "store_generation_context",
+        new=AsyncMock(),
+    ), patch.object(
+        presentation_endpoint.MEM0_PRESENTATION_MEMORY_SERVICE,
+        "store_generated_outlines",
+        new=AsyncMock(),
+    ), patch.object(
+        presentation_endpoint,
+        "get_layout_by_name",
+        new=AsyncMock(return_value=layout),
+    ), patch.object(
+        presentation_endpoint,
+        "generate_presentation_structure",
+        new=generate_structure,
+    ), patch.object(
+        presentation_endpoint,
+        "get_slide_content_from_type_and_outline",
+        get_slide_content,
+    ), patch.object(
+        presentation_endpoint,
+        "process_slide_and_fetch_assets",
+        new=AsyncMock(return_value=[]),
+    ), patch.object(
+        presentation_endpoint,
+        "get_images_directory",
+        return_value="/tmp",
+    ), patch.object(
+        presentation_endpoint,
+        "ImageGenerationService",
+        return_value=Mock(),
+    ), patch.object(
+        presentation_endpoint.CONCURRENT_SERVICE,
+        "run_task",
+        new=Mock(),
+    ), patch.object(
+        presentation_endpoint,
+        "random",
+        new=Mock(randint=Mock(return_value=0)),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            _run(
+                presentation_endpoint.generate_presentation_handler(
+                    request=request,
+                    presentation_id=uuid.uuid4(),
+                    async_status=None,
+                    sql_session=fake_async_session,
+                )
+            )
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail["issues"][0]["reason"] == "unbound_visible_schema_default"
+    assert exc.value.detail["issues"][0]["category"] == "strict_default_leakage"
+    assert exc.value.detail["issues"][0]["details"]["field_path"] == "tableData"
+    assert fake_async_session.added_all == []
+    generate_structure.assert_not_awaited()
+    get_slide_content.assert_not_awaited()
+
+
+def test_generate_presentation_handler_skips_default_leaking_layout_when_unpinned(
+    fake_async_session,
+):
+    request = GeneratePresentationRequest(
+        content="Create a contract-preserving QBR.",
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Executive Answer",
+                    "",
+                    "Question: Which paths need attention?",
+                    "Answer: The selected answer is fully supplied by Pear.",
+                ]
+            )
+        ],
+        language="English",
+        export_as="pdf",
+        template="general",
+        contract_mode="strict",
+        generation_mode="layout_from_contract",
+        content_generation="preserve",
+        generation_contract={},
+    )
+    presentation_id = uuid.uuid4()
+    layout = PresentationLayoutModel(
+        name="general",
+        ordered=False,
+        slides=[
+            SlideLayoutModel(
+                id="default-leaking",
+                name="Default Leaking",
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "maxLength": 80},
+                        "body": {"type": "string", "maxLength": 300},
+                        "tableData": {
+                            "type": "object",
+                            "default": {
+                                "headers": ["Company", "Revenue"],
+                                "rows": [["Company A", "$2.5M"]],
+                            },
+                            "properties": {
+                                "headers": {"type": "array", "maxItems": 5},
+                                "rows": {"type": "array", "maxItems": 6},
+                            },
+                        },
+                    },
+                },
+            ),
+            SlideLayoutModel(
+                id="clean-body",
+                name="Clean Body",
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "maxLength": 80},
+                        "body": {"type": "string", "maxLength": 500},
+                    },
+                },
+            ),
+        ],
+    )
+    get_slide_content = AsyncMock(
+        side_effect=AssertionError("strict preserve must not call slide content LLM")
+    )
+
+    with patch.object(
+        presentation_endpoint.MEM0_PRESENTATION_MEMORY_SERVICE,
+        "store_generation_context",
+        new=AsyncMock(),
+    ), patch.object(
+        presentation_endpoint.MEM0_PRESENTATION_MEMORY_SERVICE,
+        "store_generated_outlines",
+        new=AsyncMock(),
+    ), patch.object(
+        presentation_endpoint,
+        "get_layout_by_name",
+        new=AsyncMock(return_value=layout),
+    ), patch.object(
+        presentation_endpoint,
+        "generate_presentation_structure",
+        new=AsyncMock(return_value=PresentationStructureModel(slides=[0])),
+    ), patch.object(
+        presentation_endpoint,
+        "get_slide_content_from_type_and_outline",
+        get_slide_content,
+    ), patch.object(
+        presentation_endpoint,
+        "process_slide_and_fetch_assets",
+        new=AsyncMock(return_value=[]),
+    ), patch.object(
+        presentation_endpoint,
+        "get_images_directory",
+        return_value="/tmp",
+    ), patch.object(
+        presentation_endpoint,
+        "ImageGenerationService",
+        return_value=Mock(),
+    ), patch.object(
+        presentation_endpoint,
+        "export_presentation",
+        new=AsyncMock(
+            return_value=PresentationAndPath(
+                presentation_id=presentation_id,
+                path="/tmp/generated/deck.pdf",
+            )
+        ),
+    ), patch.object(
+        presentation_endpoint.CONCURRENT_SERVICE,
+        "run_task",
+        new=Mock(),
+    ):
+        response = _run(
+            presentation_endpoint.generate_presentation_handler(
+                request=request,
+                presentation_id=presentation_id,
+                async_status=None,
+                sql_session=fake_async_session,
+            )
+        )
+
+    assert response.path.endswith(".pdf")
+    presentation = fake_async_session.added[0]
+    assert presentation.structure["slides"] == [1]
+    slide = fake_async_session.added_all[0]
+    assert slide.layout == "clean-body"
+    assert "tableData" not in slide.content
     get_slide_content.assert_not_awaited()
 
 

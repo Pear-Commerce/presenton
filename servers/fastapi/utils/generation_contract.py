@@ -47,24 +47,78 @@ GENERIC_PLACEHOLDER_LABEL_RE = re.compile(
 )
 
 
+STRICT_REQUEST_CONTRACT_REASONS = {
+    "missing_required_sections",
+    "missing_locked_text",
+    "empty_evidence_table",
+}
+STRICT_STRUCTURE_REASONS = {
+    "skipped_section",
+    "extra_slide",
+    "pinned_layout_count_mismatch",
+    "unknown_pinned_layout_id",
+}
+STRICT_LAYOUT_FIT_REASONS = {
+    "no_compatible_title_layout",
+    "no_compatible_preserved_text_layout",
+    "no_compatible_locked_text_layout",
+    "no_compatible_table_layout",
+    "no_layout_candidates",
+}
+STRICT_DEFAULT_LEAKAGE_REASONS = {"unbound_visible_schema_default"}
+STRICT_TABLE_SHAPE_REASONS = {"table_rendered_as_prose", "changed_table_values"}
+STRICT_CONTENT_INTEGRITY_REASONS = {
+    "missing_locked_text",
+    "changed_metric_date_or_label",
+    "forbidden_addition",
+    "generic_placeholder_content",
+}
+
+
+def _issue_category_for_reason(reason: str, stage: str = "") -> Optional[str]:
+    if stage == "pptx_export" and reason in STRICT_CONTENT_INTEGRITY_REASONS.union(
+        STRICT_TABLE_SHAPE_REASONS
+    ):
+        return "strict_export_integrity"
+    if stage == "request" and reason in STRICT_REQUEST_CONTRACT_REASONS:
+        return "strict_request_contract"
+    if reason in STRICT_DEFAULT_LEAKAGE_REASONS:
+        return "strict_default_leakage"
+    if reason in STRICT_LAYOUT_FIT_REASONS:
+        return "strict_layout_fit"
+    if reason in STRICT_TABLE_SHAPE_REASONS:
+        return "strict_table_shape"
+    if reason in STRICT_STRUCTURE_REASONS:
+        return "strict_structure"
+    if reason in STRICT_CONTENT_INTEGRITY_REASONS:
+        return "strict_content_integrity"
+    if reason in STRICT_REQUEST_CONTRACT_REASONS:
+        return "strict_request_contract"
+    return None
+
+
 @dataclass
 class ContractIssue:
     reason: str
     message: str
     severity: str = "error"
     stage: str = "contract"
+    category: Optional[str] = None
     section_index: Optional[int] = None
     expected: Any = None
     actual: Any = None
     details: Optional[dict[str, Any]] = None
 
     def to_dict(self) -> dict[str, Any]:
+        category = self.category or _issue_category_for_reason(self.reason, self.stage)
         result = {
             "severity": self.severity,
             "reason": self.reason,
             "message": self.message,
             "stage": self.stage,
         }
+        if category is not None:
+            result["category"] = category
         if self.section_index is not None:
             result["section_index"] = self.section_index
         if self.expected is not None:
@@ -82,8 +136,10 @@ class ContractTable:
     rows: list[list[str]]
     slide_index: Optional[int] = None
     section_title: Optional[str] = None
-    required: bool = True
+    required: bool = False
     source: str = "markdown"
+    binding_kind: str = "markdown_source"
+    hard_table_binding: bool = False
 
     @property
     def column_count(self) -> int:
@@ -120,6 +176,8 @@ class GenerationContractState:
     forbidden_additions: list[str] = field(default_factory=list)
     exact_terms: list[str] = field(default_factory=list)
     evidence_tables: list[ContractTable] = field(default_factory=list)
+    explicit_evidence_tables: list[ContractTable] = field(default_factory=list)
+    markdown_tables: list[ContractTable] = field(default_factory=list)
     tables_are_evidence: bool = False
 
 
@@ -329,6 +387,7 @@ def _table_from_contract(value: Any) -> Optional[ContractTable]:
         slide_index = value.get("slide_index") or value.get("slideIndex")
         section_title = value.get("section_title") or value.get("sectionTitle")
         required = value.get("required", True)
+        source = value.get("source") or "generation_contract"
     else:
         headers = getattr(value, "headers", []) or []
         rows = getattr(value, "rows", []) or []
@@ -336,6 +395,7 @@ def _table_from_contract(value: Any) -> Optional[ContractTable]:
         slide_index = getattr(value, "slide_index", None)
         section_title = getattr(value, "section_title", None)
         required = getattr(value, "required", True)
+        source = getattr(value, "source", None) or "generation_contract"
     if markdown and not headers and not rows:
         parsed = parse_markdown_tables(markdown)
         if parsed:
@@ -343,7 +403,9 @@ def _table_from_contract(value: Any) -> Optional[ContractTable]:
             table.slide_index = slide_index
             table.section_title = section_title
             table.required = bool(required)
-            table.source = "generation_contract"
+            table.source = source
+            table.binding_kind = "explicit_contract"
+            table.hard_table_binding = bool(required)
             return table
     clean_headers = _strings(headers)
     clean_rows = [[_clean_text(cell) for cell in row] for row in rows or []]
@@ -355,7 +417,9 @@ def _table_from_contract(value: Any) -> Optional[ContractTable]:
         slide_index=slide_index,
         section_title=section_title,
         required=bool(required),
-        source="generation_contract",
+        source=source,
+        binding_kind="explicit_contract",
+        hard_table_binding=bool(required),
     )
 
 
@@ -391,6 +455,19 @@ def _dedupe_tables(tables: Iterable[ContractTable]) -> list[ContractTable]:
         seen.add(signature)
         result.append(table)
     return result
+
+
+def _table_with_binding_policy(
+    table: ContractTable,
+    *,
+    tables_are_evidence: bool,
+) -> ContractTable:
+    table.hard_table_binding = bool(table.hard_table_binding or tables_are_evidence)
+    if table.binding_kind == "explicit_contract":
+        table.hard_table_binding = bool(table.required or tables_are_evidence)
+    else:
+        table.required = bool(tables_are_evidence)
+    return table
 
 
 def _dedupe_text_blocks(blocks: Iterable[ContractTextBlock]) -> list[ContractTextBlock]:
@@ -467,14 +544,30 @@ def build_generation_contract_state(request: Any) -> GenerationContractState:
         slides_markdown = _required_sections_to_markdown(required_sections)
 
     sections = _sections_from_markdown(slides_markdown)
-    evidence_tables = [
+    tables_are_evidence = bool(_contract_obj(contract, "tables_are_evidence", False))
+    explicit_evidence_tables = [
         table
         for table in (_table_from_contract(value) for value in _contract_obj(contract, "evidence_tables", []) or [])
         if table
     ]
+    explicit_evidence_tables = [
+        _table_with_binding_policy(table, tables_are_evidence=tables_are_evidence)
+        for table in explicit_evidence_tables
+    ]
+    markdown_tables: list[ContractTable] = []
     for section in sections:
-        evidence_tables.extend(section.tables)
-    evidence_tables = _dedupe_tables(evidence_tables)
+        for table in section.tables:
+            table.binding_kind = "markdown_source"
+            table.source = table.source or "markdown"
+            markdown_tables.append(
+                _table_with_binding_policy(
+                    table,
+                    tables_are_evidence=tables_are_evidence,
+                )
+            )
+    explicit_evidence_tables = _dedupe_tables(explicit_evidence_tables)
+    markdown_tables = _dedupe_tables(markdown_tables)
+    evidence_tables = _dedupe_tables([*explicit_evidence_tables, *markdown_tables])
 
     exact_terms = _strings(_contract_obj(contract, "exact_terms", []) or [])
     if enabled:
@@ -489,7 +582,9 @@ def build_generation_contract_state(request: Any) -> GenerationContractState:
         forbidden_additions=_strings(_contract_obj(contract, "forbidden_additions", []) or []),
         exact_terms=exact_terms,
         evidence_tables=evidence_tables,
-        tables_are_evidence=bool(_contract_obj(contract, "tables_are_evidence", False)),
+        explicit_evidence_tables=explicit_evidence_tables,
+        markdown_tables=markdown_tables,
+        tables_are_evidence=tables_are_evidence,
     )
 
 
@@ -515,7 +610,18 @@ def enforce_contract_or_raise(
 ) -> None:
     if not state.enabled or not issues:
         return
-    payload = diagnostic_payload(issues, stage=stage)
+    warnings = [issue for issue in issues if issue.severity == "warning"]
+    errors = [issue for issue in issues if issue.severity != "warning"]
+    if warnings:
+        print(
+            f"[generation_contract] warning: {diagnostic_payload(warnings, stage=stage, status='warn')}",
+            flush=True,
+        )
+    if not errors:
+        return
+    payload = diagnostic_payload(errors, stage=stage)
+    if warnings:
+        payload["warnings"] = [issue.to_dict() for issue in warnings]
     if state.violation_policy == "warn":
         print(f"[generation_contract] warning: {payload}", flush=True)
         return
@@ -714,6 +820,10 @@ def _path_allows_visible_json_text(path: list[str]) -> bool:
     return True
 
 
+def _path_allows_visible_default_text(path: list[str]) -> bool:
+    return _path_allows_visible_json_text(path)
+
+
 def _is_string_schema(schema: Any) -> bool:
     if not isinstance(schema, dict):
         return False
@@ -846,13 +956,92 @@ def _set_path(target: dict, path: list[str], value: Any) -> None:
         target.update(value)
 
 
-def _visible_schema_text_defaults(slide_schema: dict) -> list[tuple[list[str], str]]:
-    defaults: list[tuple[list[str], str]] = []
-    for path, _ in _schema_text_paths(slide_schema):
-        schema = _schema_at_path(slide_schema, path)
-        default = schema.get("default") if isinstance(schema, dict) else None
-        if isinstance(default, str) and _clean_text(default):
-            defaults.append((path, _clean_text(default)))
+def _default_kind(value: Any) -> str:
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return type(value).__name__
+
+
+def _visible_schema_default_text_entries(
+    default: Any,
+    *,
+    field_path: list[str],
+    default_path: Optional[list[str]] = None,
+    default_kind: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    default_path = default_path or []
+    default_kind = default_kind or _default_kind(default)
+    full_path = [*field_path, *default_path]
+    if isinstance(default, str):
+        text = _clean_text(default)
+        if not text or not _path_allows_visible_default_text(full_path):
+            return []
+        return [
+            {
+                "field_path": field_path,
+                "default_path": full_path,
+                "default_kind": default_kind,
+                "value": text,
+            }
+        ]
+    if isinstance(default, dict):
+        entries: list[dict[str, Any]] = []
+        for key, child in default.items():
+            child_path = [*default_path, str(key)]
+            if not _path_allows_visible_default_text([*field_path, *child_path]):
+                continue
+            entries.extend(
+                _visible_schema_default_text_entries(
+                    child,
+                    field_path=field_path,
+                    default_path=child_path,
+                    default_kind=default_kind,
+                )
+            )
+        return entries
+    if isinstance(default, list):
+        entries: list[dict[str, Any]] = []
+        for index, child in enumerate(default):
+            entries.extend(
+                _visible_schema_default_text_entries(
+                    child,
+                    field_path=field_path,
+                    default_path=[*default_path, str(index)],
+                    default_kind=default_kind,
+                )
+            )
+        return entries
+    return []
+
+
+def _visible_schema_defaults(
+    schema: Any,
+    path: Optional[list[str]] = None,
+) -> list[dict[str, Any]]:
+    path = path or []
+    if not isinstance(schema, dict):
+        return []
+
+    defaults: list[dict[str, Any]] = []
+    if "default" in schema and _path_allows_visible_default_text(path):
+        defaults.extend(
+            _visible_schema_default_text_entries(
+                schema.get("default"),
+                field_path=path,
+            )
+        )
+
+    props = schema.get("properties")
+    if isinstance(props, dict):
+        for key, child in props.items():
+            child_path = [*path, key]
+            if not _path_allows_visible_default_text(child_path):
+                continue
+            defaults.extend(_visible_schema_defaults(child, child_path))
     return defaults
 
 
@@ -866,6 +1055,16 @@ def _source_text_for_slide(state: GenerationContractState, slide_index: int) -> 
     return "\n".join(part for part in parts if part)
 
 
+def _path_or_ancestor_bound(content: dict, path: list[str]) -> bool:
+    if not path:
+        return False
+    for end in range(len(path), 0, -1):
+        value = _get_path(content, path[:end])
+        if value not in (None, ""):
+            return True
+    return False
+
+
 def _unbound_visible_schema_default_issues(
     slide_schema: dict,
     state: GenerationContractState,
@@ -877,14 +1076,18 @@ def _unbound_visible_schema_default_issues(
 
     source_text = _source_text_for_slide(state, slide_index)
     issues: list[ContractIssue] = []
-    for path, default in _visible_schema_text_defaults(slide_schema):
-        if _get_path(content, path) not in (None, ""):
+    for entry in _visible_schema_defaults(slide_schema):
+        field_path = entry["field_path"]
+        default_path = entry["default_path"]
+        default = entry["value"]
+        if _path_or_ancestor_bound(content, default_path):
             continue
         if _norm(default) and _norm(default) in _norm(source_text):
             continue
         issues.append(
             ContractIssue(
                 reason="unbound_visible_schema_default",
+                category="strict_default_leakage",
                 message=(
                     "Selected layout would render visible schema default text "
                     "that is not present in the strict source content."
@@ -896,7 +1099,11 @@ def _unbound_visible_schema_default_issues(
                     "issue_code": "STRICT_LAYOUT_VISIBLE_DEFAULT_UNBOUND",
                     "slide_index": slide_index,
                     "section_index": slide_index + 1,
-                    "field_path": _field_path(path),
+                    "source_path": f"slides_markdown[{slide_index}]",
+                    "field_path": _field_path(field_path),
+                    "default_path": _field_path(default_path),
+                    "default_kind": entry["default_kind"],
+                    "default_sample": default,
                 },
             )
         )
@@ -1009,6 +1216,8 @@ def _table_fit_issue_details(
         "issue_code": "STRICT_PRESERVE_TABLE_FIT_FAILED",
         "content_kind": "evidence_table",
         "source_path": _table_source_path(table, slide_index),
+        "binding_kind": table.binding_kind,
+        "required_table_binding": bool(table.hard_table_binding),
         "slide_index": slide_index,
         "section_index": slide_index + 1,
         "columns": table.column_count,
@@ -1045,17 +1254,91 @@ def _tables_for_slide(
     state: GenerationContractState,
     slide_index: int,
 ) -> list[ContractTable]:
-    section = state.sections[slide_index] if slide_index < len(state.sections) else None
     return _dedupe_tables(
         [
-            *(section.tables if section else []),
-            *(
-                table
-                for table in state.evidence_tables
-                if table.slide_index == slide_index + 1
-            ),
+            table
+            for table in state.evidence_tables
+            if table.slide_index is None or table.slide_index == slide_index + 1
         ]
     )
+
+
+def all_source_tables_for_slide(
+    state: GenerationContractState,
+    slide_index: int,
+) -> list[ContractTable]:
+    return _tables_for_slide(state, slide_index)
+
+
+def required_tables_for_slide(
+    state: GenerationContractState,
+    slide_index: int,
+) -> list[ContractTable]:
+    return [
+        table
+        for table in all_source_tables_for_slide(state, slide_index)
+        if table.hard_table_binding
+    ]
+
+
+def optional_tables_for_slide(
+    state: GenerationContractState,
+    slide_index: int,
+) -> list[ContractTable]:
+    return [
+        table
+        for table in all_source_tables_for_slide(state, slide_index)
+        if not table.hard_table_binding
+    ]
+
+
+def _table_can_fit_unused_schema_path(
+    table: ContractTable,
+    slide_schema: dict,
+    schema_paths: list[tuple[list[str], str]],
+    used_paths: set[tuple[str, ...]],
+) -> bool:
+    return any(
+        tuple(path) not in used_paths
+        and _table_fits_schema(table, _schema_at_path(slide_schema, path), header_key)
+        for path, header_key in schema_paths
+    )
+
+
+def _optional_tables_need_body_preservation(
+    slide_schema: dict,
+    state: GenerationContractState,
+    slide_index: int,
+) -> bool:
+    optional_tables = optional_tables_for_slide(state, slide_index)
+    if not optional_tables:
+        return False
+    schema_paths = _schema_table_paths(slide_schema)
+    used_paths: set[tuple[str, ...]] = set()
+    for table in required_tables_for_slide(state, slide_index):
+        for path, header_key in schema_paths:
+            path_key = tuple(path)
+            if path_key in used_paths:
+                continue
+            if _table_fits_schema(table, _schema_at_path(slide_schema, path), header_key):
+                used_paths.add(path_key)
+                break
+    for table in optional_tables:
+        if not _table_can_fit_unused_schema_path(
+            table,
+            slide_schema,
+            schema_paths,
+            used_paths,
+        ):
+            return True
+        for path, header_key in schema_paths:
+            path_key = tuple(path)
+            if path_key in used_paths:
+                continue
+            if _table_fits_schema(table, _schema_at_path(slide_schema, path), header_key):
+                used_paths.add(path_key)
+                break
+    return False
 
 
 def _text_blocks_for_slide(
@@ -1289,6 +1572,8 @@ def _preserved_label_line(
 def _preserved_markdown_body_text(
     markdown: str,
     consumed_line_indices: Optional[set[int]] = None,
+    *,
+    preserve_table_blocks: bool = False,
 ) -> str:
     lines = _sanitized_markdown_lines(markdown)
     consumed_line_indices = consumed_line_indices or set()
@@ -1314,6 +1599,8 @@ def _preserved_markdown_body_text(
             continue
         table_block_end = _markdown_table_block_end(lines, i)
         if table_block_end is not None:
+            if preserve_table_blocks:
+                preserved.extend(line.rstrip() for line in lines[i:table_block_end])
             i = table_block_end
             continue
         if RENDERER_INSTRUCTION_RE.match(line):
@@ -1395,7 +1682,15 @@ def _build_preserved_markdown_text_content(
             used_paths.add(tuple(subtitle_path))
             consumed_line_indices.add(subtitle_line[0])
 
-    body_text = _preserved_markdown_body_text(markdown, consumed_line_indices)
+    body_text = _preserved_markdown_body_text(
+        markdown,
+        consumed_line_indices,
+        preserve_table_blocks=_optional_tables_need_body_preservation(
+            slide_schema,
+            state,
+            slide_index,
+        ),
+    )
     source_text = "\n".join(
         part for part in [pending_title, body_text] if part
     ).strip()
@@ -1622,7 +1917,7 @@ def overlay_contract_tables(
 ) -> tuple[dict, list[ContractIssue]]:
     if not state.enabled:
         return slide_content, []
-    tables = _tables_for_slide(state, slide_index)
+    tables = all_source_tables_for_slide(state, slide_index)
     if not tables:
         return slide_content, []
 
@@ -1640,22 +1935,24 @@ def overlay_contract_tables(
                 selected = (path, header_key)
                 break
         if not selected:
-            issues.append(
-                ContractIssue(
-                    reason="no_compatible_table_layout",
-                    message="Selected layout cannot preserve the required evidence table dimensions.",
-                    stage="slide_content",
-                    section_index=slide_index + 1,
-                    expected={"columns": table.column_count, "rows": table.row_count},
-                    details=_table_fit_issue_details(
-                        table,
-                        slide_schema,
-                        schema_paths,
-                        slide_index,
-                        used_paths,
-                    ),
+            if table.hard_table_binding:
+                issues.append(
+                    ContractIssue(
+                        reason="no_compatible_table_layout",
+                        category="strict_layout_fit",
+                        message="Selected layout cannot preserve the required evidence table dimensions.",
+                        stage="slide_content",
+                        section_index=slide_index + 1,
+                        expected={"columns": table.column_count, "rows": table.row_count},
+                        details=_table_fit_issue_details(
+                            table,
+                            slide_schema,
+                            schema_paths,
+                            slide_index,
+                            used_paths,
+                        ),
+                    )
                 )
-            )
             continue
         path, header_key = selected
         existing = _get_path(content, path)
@@ -1770,6 +2067,19 @@ def _table_matches(expected: ContractTable, actual: ContractTable) -> bool:
     )
 
 
+def _table_values_are_present_in_text(table: ContractTable, text: str) -> bool:
+    normalized_text = _norm(text)
+    values = [
+        *table.headers,
+        *(cell for row in table.rows for cell in row),
+    ]
+    return all(
+        _norm(value) in normalized_text
+        for value in values
+        if _norm(value)
+    )
+
+
 def validate_slide_json_contract(
     state: GenerationContractState,
     slide_contents: list[dict],
@@ -1816,23 +2126,62 @@ def validate_slide_json_contract(
             )
 
     actual_tables = []
+    actual_tables_by_slide: dict[int, list[ContractTable]] = {}
+    visible_text_by_slide: dict[int, str] = {}
     for slide_index, content in enumerate(slide_contents, start=1):
+        visible_text_by_slide[slide_index] = "\n".join(_walk_visible_strings(content))
         for table in _table_values_from_json(content):
             table.slide_index = slide_index
             actual_tables.append(table)
+            actual_tables_by_slide.setdefault(slide_index, []).append(table)
 
     for expected in state.evidence_tables:
-        matches = [table for table in actual_tables if _table_matches(expected, table)]
-        if not matches and (state.tables_are_evidence or expected.required):
-            expected_values = "\n".join(expected.headers + [cell for row in expected.rows for cell in row])
-            prose_has_values = all(_norm(cell) in normalized_full for cell in expected_values.splitlines() if _norm(cell))
+        candidate_tables = (
+            actual_tables_by_slide.get(expected.slide_index, [])
+            if expected.slide_index is not None
+            else actual_tables
+        )
+        matches = [table for table in candidate_tables if _table_matches(expected, table)]
+        if not matches:
+            target_text = (
+                visible_text_by_slide.get(expected.slide_index, "")
+                if expected.slide_index is not None
+                else full_text
+            )
+            prose_has_values = _table_values_are_present_in_text(expected, target_text)
+            if prose_has_values:
+                severity = "error" if expected.hard_table_binding else "warning"
+                reason = "table_rendered_as_prose"
+            else:
+                severity = "error"
+                reason = "changed_table_values"
             issues.append(
                 ContractIssue(
-                    reason="table_rendered_as_prose" if prose_has_values else "changed_table_values",
-                    message="Evidence table was not preserved as a matching table object.",
+                    reason=reason,
+                    severity=severity,
+                    category="strict_table_shape",
+                    message=(
+                        "Expected table values were not preserved visibly."
+                        if reason == "changed_table_values"
+                        else (
+                            "Evidence table was not preserved as a matching table object."
+                            if expected.hard_table_binding
+                            else "Source markdown table was preserved visibly but not as a table object."
+                        )
+                    ),
                     stage="slide_content",
                     section_index=expected.slide_index,
                     expected={"headers": expected.headers, "rows": expected.rows},
+                    details={
+                        "source_path": _table_source_path(
+                            expected,
+                            (expected.slide_index - 1)
+                            if expected.slide_index is not None
+                            else 0,
+                        ),
+                        "binding_kind": expected.binding_kind,
+                        "required_table_binding": bool(expected.hard_table_binding),
+                    },
                 )
             )
     return issues
