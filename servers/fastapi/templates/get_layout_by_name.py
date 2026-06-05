@@ -141,64 +141,57 @@ async def get_layout_by_name(layout_name: str) -> PresentationLayoutModel:
 
     schema_payload: dict[str, Any] | None = None
     runtime_error: str | None = None
+    fallback_error: str | None = None
 
-    try:
-        schema = await EXPORT_TASK_SERVICE.extract_schema(url)
-        schema_payload = schema.model_dump()
-        slide_ids = [s.get("id") for s in schema_payload.get("slides") or []][:12]
+    schema_payload, fallback_error = await _fetch_template_fallback_payload(
+        layout_name
+    )
+    if schema_payload:
         LOGGER.info(
-            "[template_layout] extract-schema succeeded template=%r "
-            "payload_name=%r ordered=%s icon_weight=%s slide_count=%d slide_ids(sample)=%s",
+            "[template_layout] fallback-first OK template=%r slide_count=%d",
             layout_name,
-            schema_payload.get("name"),
-            schema_payload.get("ordered"),
-            schema_payload.get("icon_weight"),
             len(schema_payload.get("slides") or []),
-            slide_ids,
         )
-    except HTTPException as exc:
-        # Backward compatibility: older export runtimes do not implement
-        # extract-schema and return "Invalid task type".
-        runtime_error = str(exc.detail)
-    except Exception as exc:  # noqa: BLE001
-        runtime_error = str(exc)
 
     if schema_payload is None:
-        schema_payload, fallback_error = await _fetch_template_fallback_payload(
-            layout_name
-        )
-        if schema_payload and runtime_error:
+        try:
+            schema = await EXPORT_TASK_SERVICE.extract_schema(url)
+            schema_payload = schema.model_dump()
+            slide_ids = [s.get("id") for s in schema_payload.get("slides") or []][:12]
             LOGGER.info(
-                "[template_layout] primary extract-schema failed template=%r detail=%s",
+                "[template_layout] extract-schema succeeded template=%r "
+                "payload_name=%r ordered=%s icon_weight=%s slide_count=%d slide_ids(sample)=%s",
+                layout_name,
+                schema_payload.get("name"),
+                schema_payload.get("ordered"),
+                schema_payload.get("icon_weight"),
+                len(schema_payload.get("slides") or []),
+                slide_ids,
+            )
+        except HTTPException as exc:
+            # Backward compatibility: older export runtimes do not implement
+            # extract-schema and return "Invalid task type".
+            runtime_error = str(exc.detail)
+        except Exception as exc:  # noqa: BLE001
+            runtime_error = str(exc)
+
+    if schema_payload is None:
+        error_detail = runtime_error or fallback_error or "unknown error"
+        if runtime_error:
+            LOGGER.warning(
+                "[template_layout] extract-schema HTTP error template=%r detail=%s",
                 layout_name,
                 _preview_detail(runtime_error),
             )
-
-        if schema_payload is None:
-            error_detail = runtime_error or fallback_error or "unknown error"
-            if runtime_error:
-                LOGGER.warning(
-                    "[template_layout] extract-schema HTTP error template=%r detail=%s",
-                    layout_name,
-                    _preview_detail(runtime_error),
-                )
-            LOGGER.error(
-                "[template_layout] no schema payload template=%r combined_detail=%s",
-                layout_name,
-                _preview_detail(error_detail),
-            )
-            raise HTTPException(
-                status_code=404,
-                detail=f"Template '{layout_name}' not found: {error_detail}",
-            )
-    elif not layout_name.startswith("custom-"):
-        # The bundled export runtime can read the schema page but currently keeps
-        # only name/order/slides from settings. The JSON fallback is cheaper and
-        # preserves template-level settings such as icon weight.
-        fallback_payload, _ = await _fetch_template_fallback_payload(layout_name)
-        if fallback_payload:
-            fallback_icon_weight = extract_icon_weight_from_settings(fallback_payload)
-            schema_payload["icon_weight"] = fallback_icon_weight
+        LOGGER.error(
+            "[template_layout] no schema payload template=%r combined_detail=%s",
+            layout_name,
+            _preview_detail(error_detail),
+        )
+        raise HTTPException(
+            status_code=404,
+            detail=f"Template '{layout_name}' not found: {error_detail}",
+        )
 
     local_settings = _read_builtin_template_settings(layout_name)
     if local_settings:

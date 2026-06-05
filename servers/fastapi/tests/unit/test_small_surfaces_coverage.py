@@ -531,6 +531,12 @@ def test_get_layout_by_name_returns_model():
         ), patch(
             "templates.get_layout_by_name.aiohttp.ClientSession",
             return_value=_make_aio_layout_session(resp),
+        ), patch.object(
+            tpl_layout_fetcher.EXPORT_TASK_SERVICE,
+            "extract_schema",
+            new=AsyncMock(
+                side_effect=AssertionError("fallback schema should not call export")
+            ),
         ):
             layout = await tpl_layout_fetcher.get_layout_by_name("deck")
             assert isinstance(layout, PresentationLayoutModel)
@@ -550,6 +556,10 @@ def test_get_layout_by_name_raises_on_http_failure():
         ), patch(
             "templates.get_layout_by_name.aiohttp.ClientSession",
             return_value=_make_aio_layout_session(resp),
+        ), patch.object(
+            tpl_layout_fetcher.EXPORT_TASK_SERVICE,
+            "extract_schema",
+            new=AsyncMock(side_effect=HTTPException(status_code=404, detail="down")),
         ):
             with pytest.raises(HTTPException):
                 await tpl_layout_fetcher.get_layout_by_name("missing")
@@ -594,7 +604,16 @@ def test_get_layout_by_name_attach_auth_cookie(monkeypatch):
         return sess
 
     async def runner():
-        with patch("templates.get_layout_by_name.aiohttp.ClientSession", side_effect=capture_session):
+        with patch(
+            "templates.get_layout_by_name.aiohttp.ClientSession",
+            side_effect=capture_session,
+        ), patch.object(
+            tpl_layout_fetcher.EXPORT_TASK_SERVICE,
+            "extract_schema",
+            new=AsyncMock(
+                side_effect=AssertionError("fallback schema should not call export")
+            ),
+        ):
             layout = await tpl_layout_fetcher.get_layout_by_name("deck")
             assert isinstance(layout, PresentationLayoutModel)
 
