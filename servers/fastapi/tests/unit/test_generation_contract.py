@@ -6,6 +6,7 @@ from utils import generation_contract as generation_contract_module
 from models.generate_presentation_request import GeneratePresentationRequest
 from models.api_error_model import APIErrorModel
 from utils.generation_contract import (
+    ContractTable,
     build_preserved_slide_content,
     build_generation_contract_state,
     contract_layout_issues_for_schema,
@@ -1142,17 +1143,22 @@ def test_strict_contract_accepts_concrete_retailer_campaign_source_terms(monkeyp
         ]
     )
 
+    table = ContractTable(
+        headers=["Retailer", "Visit Rate", "Date"],
+        rows=[["Target", "7.1%", "2026-05-16"]],
+    )
+
     monkeypatch.setattr(
         generation_contract_module,
         "_extract_pptx",
-        lambda _path: (text, []),
+        lambda _path: (text, [table]),
     )
 
     assert validate_slide_json_contract(state, slide_json) == []
     assert validate_pptx_contract(state, "/tmp/deck.pptx") == []
 
 
-def test_validate_pptx_contract_accepts_visible_text_table_export(monkeypatch):
+def test_validate_pptx_contract_rejects_required_table_exported_as_text(monkeypatch):
     state = build_generation_contract_state(strict_request())
     text = "\n".join(
         [
@@ -1171,6 +1177,43 @@ def test_validate_pptx_contract_accepts_visible_text_table_export(monkeypatch):
         generation_contract_module,
         "_extract_pptx",
         lambda _path: (text, []),
+    )
+
+    issues = validate_pptx_contract(state, "/tmp/deck.pptx")
+    table_issue = next(
+        issue for issue in issues if issue.reason == "table_rendered_as_prose"
+    )
+
+    assert table_issue.stage == "pptx_export"
+    assert table_issue.expected == {
+        "headers": ["Retailer", "Visit Rate", "Date"],
+        "rows": [["Target", "7.1%", "2026-05-16"]],
+    }
+
+
+def test_validate_pptx_contract_accepts_matching_table_export(monkeypatch):
+    state = build_generation_contract_state(strict_request())
+    text = "\n".join(
+        [
+            "Executive Answer",
+            "Locked claim: Target led non-Walmart retailer visit rate at 7.1% on 2026-05-16.",
+            "Retailer",
+            "Visit Rate",
+            "Date",
+            "Target",
+            "7.1%",
+            "2026-05-16",
+        ]
+    )
+    table = ContractTable(
+        headers=["Retailer", "Visit Rate", "Date"],
+        rows=[["Target", "7.1%", "2026-05-16"]],
+    )
+
+    monkeypatch.setattr(
+        generation_contract_module,
+        "_extract_pptx",
+        lambda _path: (text, [table]),
     )
 
     assert validate_pptx_contract(state, "/tmp/deck.pptx") == []

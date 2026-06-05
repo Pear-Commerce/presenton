@@ -1848,13 +1848,20 @@ def validate_pptx_contract(
                 )
             )
     for expected in state.evidence_tables:
-        if not any(_table_matches(expected, actual) for actual in tables) and not (
-            _table_values_are_visible_text(expected, text)
-        ):
+        table_matches = any(_table_matches(expected, actual) for actual in tables)
+        table_values_visible = _table_values_are_visible_text(expected, text)
+        table_shape_required = state.tables_are_evidence or expected.required
+        if table_matches:
+            continue
+        if table_shape_required or not table_values_visible:
             issues.append(
                 ContractIssue(
-                    reason="changed_table_values",
-                    message="Exported PPTX did not preserve an evidence table.",
+                    reason=(
+                        "table_rendered_as_prose"
+                        if table_values_visible
+                        else "changed_table_values"
+                    ),
+                    message="Exported PPTX did not preserve an evidence table object.",
                     stage="pptx_export",
                     section_index=expected.slide_index,
                     expected={"headers": expected.headers, "rows": expected.rows},

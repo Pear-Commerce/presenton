@@ -1,5 +1,5 @@
 from typing import Any, List, Literal, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from enums.tone import Tone
 from enums.verbosity import Verbosity
@@ -70,6 +70,28 @@ class GenerationContract(BaseModel):
 
 
 class GeneratePresentationRequest(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def accept_pinned_layout_ids_alias(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        has_slide_layout_ids = data.get("slide_layout_ids") is not None
+        has_pinned_layout_ids = data.get("pinned_layout_ids") is not None
+        if has_slide_layout_ids and has_pinned_layout_ids:
+            if data.get("slide_layout_ids") != data.get("pinned_layout_ids"):
+                raise ValueError(
+                    "pinned_layout_ids must match slide_layout_ids when both are supplied"
+                )
+            return data
+
+        if has_pinned_layout_ids:
+            aliased = dict(data)
+            aliased["slide_layout_ids"] = aliased["pinned_layout_ids"]
+            return aliased
+
+        return data
+
     content: str = Field(..., description="The content for generating the presentation")
     slides_markdown: Optional[List[str]] = Field(
         default=None, description="The markdown for the slides"
