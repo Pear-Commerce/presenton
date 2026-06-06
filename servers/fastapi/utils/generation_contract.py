@@ -1034,9 +1034,16 @@ def _summary_label_lines(
 
 def _canonical_summary_label(label: str) -> str:
     normalized = re.sub(r"\s+", " ", label.strip().lower())
-    if normalized == "metric note":
-        return "Definition"
-    return " ".join(part.capitalize() for part in normalized.split(" "))
+    return {
+        "question": "Question",
+        "answer": "Answer",
+        "what follows": "What follows",
+        "definition": "Definition",
+        "metric note": "Metric note",
+        "date range": "Date range",
+        "selected period": "Selected period",
+        "prior period": "Prior period",
+    }.get(normalized, label.strip())
 
 
 def _summary_bullet_item(

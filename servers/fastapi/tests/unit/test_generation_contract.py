@@ -808,13 +808,13 @@ def test_build_preserved_slide_content_maps_labeled_summary_to_bullets():
     assert layout_issues == []
     assert content["title"] == "Executive Summary"
     assert content["description"] == (
-        "Date Range: Feb 15-May 16, 2026. Definition: RVR = retailer visit rate; "
+        "Date range: Feb 15-May 16, 2026. Definition: RVR = retailer visit rate; "
         "retailer visits divided by page loads."
     )
     assert [item["title"] for item in content["bulletPoints"]] == [
         "Question",
         "Answer",
-        "What Follows",
+        "What follows",
     ]
     assert content["bulletPoints"][0]["description"].startswith(
         "What should Perdue take away"

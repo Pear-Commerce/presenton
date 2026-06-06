@@ -587,13 +587,13 @@ def test_strict_layout_preflight_maps_executive_summary_to_bullet_layout():
     preview = response.slides[0].content_preview
     assert preview["title"] == "Executive Summary"
     assert preview["description"] == (
-        "Date Range: Feb 15-May 16, 2026. Definition: RVR = retailer visit rate; "
+        "Date range: Feb 15-May 16, 2026. Definition: RVR = retailer visit rate; "
         "retailer visits divided by page loads."
     )
     assert [item["title"] for item in preview["bulletPoints"]] == [
         "Question",
         "Answer",
-        "What Follows",
+        "What follows",
     ]
     assert preview["bulletPoints"][1]["description"] == (
         "Walmart leads visits at 2.3% RVR; ShopRite is the watchout at 0.3%."
