@@ -1384,15 +1384,16 @@ async def generate_presentation_handler(
             for offset, slide_content in enumerate(batch_contents):
                 i = start + offset
                 slide_layout = slide_layouts[i]
+                contract_schema = content_slide_layouts[i].json_schema
                 slide_content, table_issues = overlay_contract_tables(
                     slide_content,
-                    slide_layout.json_schema,
+                    contract_schema,
                     contract_state,
                     i,
                 )
                 slide_content, text_issues = overlay_contract_text(
                     slide_content,
-                    slide_layout.json_schema,
+                    contract_schema,
                     contract_state,
                     i,
                 )

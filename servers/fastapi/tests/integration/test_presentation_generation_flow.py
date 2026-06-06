@@ -1120,6 +1120,146 @@ def test_generate_presentation_handler_uses_pinned_slide_layout_ids_without_stru
     get_slide_content.assert_not_awaited()
 
 
+def test_generate_presentation_handler_reuses_contract_schema_for_final_table_overlay(
+    fake_async_session,
+):
+    request = GeneratePresentationRequest(
+        content="Create a contract-preserving QBR.",
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Retailer Table",
+                    "",
+                    "| Retailer | Visit Rate | Retailer Visits | Views |",
+                    "| --- | --- | --- | --- |",
+                    "| ShopRite | 0.8% | 120 | 15,000 |",
+                    "| Kroger | 0.7% | 105 | 15,000 |",
+                ]
+            )
+        ],
+        slide_layout_ids=["table-layout"],
+        language="English",
+        export_as="pdf",
+        template="general",
+        contract_mode="strict",
+        generation_mode="layout_from_contract",
+        content_generation="preserve",
+        generation_contract={"tables_are_evidence": True},
+    )
+    presentation_id = uuid.uuid4()
+    layout = PresentationLayoutModel(
+        name="general",
+        ordered=False,
+        slides=[
+            SlideLayoutModel(
+                id="table-layout",
+                name="Table Layout",
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "maxLength": 80},
+                        "tableData": {
+                            "type": "object",
+                            "properties": {
+                                "headers": {"type": "array", "maxItems": 4},
+                                "rows": {"type": "array", "maxItems": 5},
+                            },
+                        },
+                    },
+                },
+            ),
+        ],
+    )
+    get_slide_content = AsyncMock(
+        side_effect=AssertionError("strict preserve must not call slide content LLM")
+    )
+    schema_markers = []
+    original_schema_with_overrides = presentation_endpoint.schema_with_contract_table_overrides
+    original_overlay_tables = presentation_endpoint.overlay_contract_tables
+
+    def marked_schema(slide_schema, state, slide_index):
+        schema = original_schema_with_overrides(slide_schema, state, slide_index)
+        return {**schema, "__contract_schema_marker__": slide_index}
+
+    def recording_overlay(slide_content, slide_schema, state, slide_index):
+        schema_markers.append(slide_schema.get("__contract_schema_marker__"))
+        return original_overlay_tables(slide_content, slide_schema, state, slide_index)
+
+    with patch.object(
+        presentation_endpoint.MEM0_PRESENTATION_MEMORY_SERVICE,
+        "store_generation_context",
+        new=AsyncMock(),
+    ), patch.object(
+        presentation_endpoint.MEM0_PRESENTATION_MEMORY_SERVICE,
+        "store_generated_outlines",
+        new=AsyncMock(),
+    ), patch.object(
+        presentation_endpoint,
+        "get_layout_by_name",
+        new=AsyncMock(return_value=layout),
+    ), patch.object(
+        presentation_endpoint,
+        "generate_presentation_structure",
+        new=AsyncMock(side_effect=AssertionError("pinned layouts skip structure LLM")),
+    ), patch.object(
+        presentation_endpoint,
+        "get_slide_content_from_type_and_outline",
+        get_slide_content,
+    ), patch.object(
+        presentation_endpoint,
+        "schema_with_contract_table_overrides",
+        new=marked_schema,
+    ), patch.object(
+        presentation_endpoint,
+        "overlay_contract_tables",
+        new=recording_overlay,
+    ), patch.object(
+        presentation_endpoint,
+        "process_slide_and_fetch_assets",
+        new=AsyncMock(return_value=[]),
+    ), patch.object(
+        presentation_endpoint,
+        "get_images_directory",
+        return_value="/tmp",
+    ), patch.object(
+        presentation_endpoint,
+        "ImageGenerationService",
+        return_value=Mock(),
+    ), patch.object(
+        presentation_endpoint,
+        "export_presentation",
+        new=AsyncMock(
+            return_value=PresentationAndPath(
+                presentation_id=presentation_id,
+                path="/tmp/generated/deck.pdf",
+            )
+        ),
+    ), patch.object(
+        presentation_endpoint.CONCURRENT_SERVICE,
+        "run_task",
+        new=Mock(),
+    ):
+        response = _run(
+            presentation_endpoint.generate_presentation_handler(
+                request=request,
+                presentation_id=presentation_id,
+                async_status=None,
+                sql_session=fake_async_session,
+            )
+        )
+
+    assert response.path.endswith(".pdf")
+    assert schema_markers == [0]
+    slide = fake_async_session.added_all[0]
+    assert slide.content["tableData"]["headers"] == [
+        "Retailer",
+        "Visit Rate",
+        "Retailer Visits",
+        "Views",
+    ]
+    get_slide_content.assert_not_awaited()
+
+
 def test_generate_presentation_handler_accepts_pinned_layout_ids_alias(
     fake_async_session,
 ):
