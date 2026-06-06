@@ -56,9 +56,6 @@ interface TableInfoSlideLayoutProps {
   data?: Partial<TableInfoSlideData>;
 }
 
-const tableTextClass =
-  "block w-full whitespace-nowrap break-normal [overflow-wrap:normal] [word-break:normal]";
-
 const TableInfoSlideLayout: React.FC<TableInfoSlideLayoutProps> = ({
   data: slideData,
 }) => {
@@ -195,10 +192,10 @@ const TableInfoSlideLayout: React.FC<TableInfoSlideLayoutProps> = ({
                     {tableHeaders.map((header, index) => (
                       <div
                         key={index}
-                        className="flex min-w-0 items-center justify-center px-6 py-4 font-semibold text-center text-sm sm:text-base"
+                        className="px-6 py-4 font-semibold text-center text-sm sm:text-base"
                         style={{ color: "var(--primary-text,#ffffff)" }}
                       >
-                        <span className={tableTextClass}>{header}</span>
+                        {header}
                       </div>
                     ))}
                   </div>
@@ -224,7 +221,7 @@ const TableInfoSlideLayout: React.FC<TableInfoSlideLayoutProps> = ({
                         .map((cell, cellIndex) => (
                           <div
                             key={cellIndex}
-                            className="flex min-w-0 items-center justify-center px-6 py-4 text-center text-sm sm:text-base"
+                            className="px-6 py-4 text-center text-sm sm:text-base"
                             style={{
                               color: "var(--background-text,#4b5563)",
                               background:
@@ -233,7 +230,7 @@ const TableInfoSlideLayout: React.FC<TableInfoSlideLayoutProps> = ({
                                   : "var(--card-color, #f3f4f6)",
                             }}
                           >
-                            <span className={tableTextClass}>{cell}</span>
+                            {cell}
                           </div>
                         ))}
                     </div>
