@@ -740,6 +740,91 @@ def test_build_preserved_slide_content_copies_title_text_and_table():
     assert content["tableData"]["rows"] == [["Target", "7.1%", "2026-05-16"]]
 
 
+def test_build_preserved_slide_content_maps_labeled_summary_to_bullets():
+    request = strict_request(
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Executive Summary",
+                    "",
+                    "Title: Executive Summary",
+                    "Question: What should Perdue take away from retailer handoff evidence in this QBR?",
+                    "Date range: Feb 15-May 16, 2026.",
+                    "Answer: Walmart leads visits at 2.3% RVR; ShopRite is the watchout at 0.3%.",
+                    "What follows: experience rates, visit leaders, and Walmart's +470 visit movement.",
+                    "Definition: RVR = retailer visit rate; retailer visits divided by page loads.",
+                ]
+            )
+        ],
+        generation_contract={"locked_text": [], "tables_are_evidence": False},
+    )
+    state = build_generation_contract_state(request)
+    schema = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "maxLength": 40},
+            "description": {
+                "type": "string",
+                "maxLength": 150,
+                "default": "Default text must not leak into strict output.",
+            },
+            "bulletPoints": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 3,
+                "default": [
+                    {
+                        "title": "Default",
+                        "description": "Default bullet text must not leak.",
+                    }
+                ],
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "maxLength": 60},
+                        "description": {"type": "string", "maxLength": 100},
+                        "icon": {
+                            "type": "object",
+                            "properties": {
+                                "__icon_url__": {"type": "string", "maxLength": 500},
+                                "__icon_query__": {"type": "string", "maxLength": 20},
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    }
+
+    content, issues = build_preserved_slide_content(schema, state, 0)
+    layout_issues = contract_layout_issues_for_schema(
+        schema,
+        state,
+        0,
+        preserve_markdown=True,
+    )
+
+    assert issues == []
+    assert layout_issues == []
+    assert content["title"] == "Executive Summary"
+    assert content["description"] == (
+        "Date Range: Feb 15-May 16, 2026. Definition: RVR = retailer visit rate; "
+        "retailer visits divided by page loads."
+    )
+    assert [item["title"] for item in content["bulletPoints"]] == [
+        "Question",
+        "Answer",
+        "What Follows",
+    ]
+    assert content["bulletPoints"][0]["description"].startswith(
+        "What should Perdue take away"
+    )
+    assert content["bulletPoints"][1]["description"] == (
+        "Walmart leads visits at 2.3% RVR; ShopRite is the watchout at 0.3%."
+    )
+    assert "icon" in content["bulletPoints"][2]
+
+
 def test_build_preserved_slide_content_rejects_nested_unbound_table_defaults():
     request = strict_request(
         slides_markdown=[

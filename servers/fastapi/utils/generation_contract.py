@@ -784,6 +784,15 @@ PRESERVED_SUBTITLE_LINE_RE = re.compile(
     r"^\s*(subtitle|period)\s*:\s*(.*?)\s*$",
     re.IGNORECASE,
 )
+PRESERVED_SUMMARY_LABEL_RE = re.compile(
+    r"^\s*(question|answer|what\s+follows|definition|metric\s+note|"
+    r"date\s+range|selected\s+period|prior\s+period)\s*:\s*(.*?)\s*$",
+    re.IGNORECASE,
+)
+SUMMARY_BULLET_ICON = {
+    "__icon_url__": "https://presenton-public.s3.ap-southeast-1.amazonaws.com/static/icons/bold/checks-bold.svg",
+    "__icon_query__": "check insight",
+}
 
 
 def _key_priority(key: str) -> Optional[int]:
@@ -954,6 +963,182 @@ def _set_path(target: dict, path: list[str], value: Any) -> None:
     else:
         target.clear()
         target.update(value)
+
+
+def _schema_summary_bullet_paths(
+    schema: Any,
+    path: Optional[list[str]] = None,
+) -> list[tuple[list[str], dict, dict]]:
+    path = path or []
+    if not isinstance(schema, dict):
+        return []
+    props = schema.get("properties")
+    if not isinstance(props, dict):
+        return []
+
+    paths: list[tuple[list[str], dict, dict]] = []
+    for key, child in props.items():
+        child_path = [*path, key]
+        items_schema = child.get("items") if isinstance(child, dict) else None
+        item_props = items_schema.get("properties") if isinstance(items_schema, dict) else None
+        if (
+            isinstance(child, dict)
+            and child.get("type") == "array"
+            and isinstance(item_props, dict)
+            and _is_string_schema(item_props.get("title", {}))
+            and _is_string_schema(item_props.get("description", {}))
+        ):
+            paths.append((child_path, child, items_schema))
+        paths.extend(_schema_summary_bullet_paths(child, child_path))
+    return paths
+
+
+def _summary_label_lines(
+    markdown: str,
+    consumed_line_indices: set[int],
+) -> list[tuple[int, str, str]]:
+    lines = _sanitized_markdown_lines(markdown)
+    found: list[tuple[int, str, str]] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        if i in consumed_line_indices or not stripped:
+            i += 1
+            continue
+        if stripped.startswith("<!--"):
+            i += 1
+            if "-->" in stripped:
+                continue
+            while i < len(lines) and "-->" not in lines[i]:
+                i += 1
+            if i < len(lines):
+                i += 1
+            continue
+        table_block_end = _markdown_table_block_end(lines, i)
+        if table_block_end is not None:
+            i = table_block_end
+            continue
+        if RENDERER_INSTRUCTION_RE.match(line) or SECTION_HEADING_RE.match(line):
+            i += 1
+            continue
+        match = PRESERVED_SUMMARY_LABEL_RE.match(line)
+        if match:
+            label = _clean_text(match.group(1))
+            value = _clean_text(match.group(2))
+            if label and value:
+                found.append((i, label, value))
+        i += 1
+    return found
+
+
+def _canonical_summary_label(label: str) -> str:
+    normalized = re.sub(r"\s+", " ", label.strip().lower())
+    if normalized == "metric note":
+        return "Definition"
+    return " ".join(part.capitalize() for part in normalized.split(" "))
+
+
+def _summary_bullet_item(
+    item_schema: dict,
+    label: str,
+    value: str,
+) -> Optional[dict[str, Any]]:
+    props = item_schema.get("properties", {})
+    title_schema = props.get("title", {})
+    description_schema = props.get("description", {})
+    title = _canonical_summary_label(label)
+    description = _clean_text(value)
+    title_max = _max_length(title_schema)
+    description_max = _max_length(description_schema)
+    if title_max is not None and len(title) > title_max:
+        return None
+    if description_max is not None and len(description) > description_max:
+        return None
+    item: dict[str, Any] = {
+        "title": title,
+        "description": description,
+    }
+    if "icon" in props:
+        item["icon"] = copy.deepcopy(SUMMARY_BULLET_ICON)
+    return item
+
+
+def _bind_preserved_summary_bullets(
+    slide_schema: dict,
+    markdown: str,
+    consumed_line_indices: set[int],
+    content: dict,
+    used_paths: set[tuple[str, ...]],
+) -> None:
+    label_lines = _summary_label_lines(markdown, consumed_line_indices)
+    if len(label_lines) < 3:
+        return
+
+    bullet_label_order = ("question", "answer", "what follows")
+    description_labels = {
+        "date range",
+        "selected period",
+        "prior period",
+        "definition",
+        "metric note",
+    }
+    lines_by_label: dict[str, tuple[int, str, str]] = {}
+    for index, raw_label, value in label_lines:
+        normalized = re.sub(r"\s+", " ", raw_label.strip().lower())
+        lines_by_label.setdefault(normalized, (index, raw_label, value))
+
+    bullet_path_entries = _schema_summary_bullet_paths(slide_schema)
+    if not bullet_path_entries:
+        return
+
+    description_parts = []
+    description_line_indexes: list[int] = []
+    for label in ("date range", "selected period", "prior period", "definition", "metric note"):
+        entry = lines_by_label.get(label)
+        if not entry or label not in description_labels:
+            continue
+        index, raw_label, value = entry
+        description_parts.append(f"{_canonical_summary_label(raw_label)}: {value}")
+        description_line_indexes.append(index)
+    description_text = " ".join(description_parts).strip()
+    if not description_text:
+        return
+
+    description_path = _first_fitting_text_path(
+        slide_schema,
+        description_text,
+        title=False,
+        excluded_paths=used_paths,
+    )
+    if not description_path:
+        return
+
+    for bullet_path, array_schema, item_schema in bullet_path_entries:
+        max_items = _schema_int(array_schema, "maxItems") or len(bullet_label_order)
+        min_items = _schema_int(array_schema, "minItems") or 0
+        items = []
+        item_indexes: list[int] = []
+        for label in bullet_label_order:
+            entry = lines_by_label.get(label)
+            if not entry or len(items) >= max_items:
+                continue
+            index, raw_label, value = entry
+            item = _summary_bullet_item(item_schema, raw_label, value)
+            if item is None:
+                items = []
+                break
+            items.append(item)
+            item_indexes.append(index)
+        if len(items) < max(1, min_items):
+            continue
+        _set_path(content, description_path, description_text)
+        used_paths.add(tuple(description_path))
+        _set_path(content, bullet_path, items)
+        used_paths.add(tuple(bullet_path))
+        consumed_line_indices.update(description_line_indexes)
+        consumed_line_indices.update(item_indexes)
+        return
 
 
 def _default_kind(value: Any) -> str:
@@ -1681,6 +1866,14 @@ def _build_preserved_markdown_text_content(
             _set_path(content, subtitle_path, subtitle_line[1])
             used_paths.add(tuple(subtitle_path))
             consumed_line_indices.add(subtitle_line[0])
+
+    _bind_preserved_summary_bullets(
+        slide_schema,
+        markdown,
+        consumed_line_indices,
+        content,
+        used_paths,
+    )
 
     body_text = _preserved_markdown_body_text(
         markdown,

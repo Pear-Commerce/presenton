@@ -496,6 +496,110 @@ def test_strict_layout_preflight_selects_wide_layout_without_generation():
     assert response.layout_catalog_hash
 
 
+def test_strict_layout_preflight_maps_executive_summary_to_bullet_layout():
+    request = presentation_endpoint.StrictLayoutPreflightRequest(
+        template="general",
+        slides_markdown=[
+            "\n".join(
+                [
+                    "### 1. Executive Summary",
+                    "",
+                    "Title: Executive Summary",
+                    "Question: What should Perdue take away from retailer handoff evidence?",
+                    "Date range: Feb 15-May 16, 2026.",
+                    "Answer: Walmart leads visits at 2.3% RVR; ShopRite is the watchout at 0.3%.",
+                    "What follows: experience rates, visit leaders, and trend deltas.",
+                    "Definition: RVR = retailer visit rate; retailer visits divided by page loads.",
+                ]
+            )
+        ],
+        contract_mode="strict",
+        generation_mode="layout_from_contract",
+        content_generation="preserve",
+        generation_contract={"tables_are_evidence": True},
+        preferred_layout_ids=[["basic-info-slide", "bullet-with-icons-slide"]],
+    )
+    layout = PresentationLayoutModel(
+        name="general",
+        ordered=False,
+        slides=[
+            SlideLayoutModel(
+                id="basic-info-slide",
+                name="Basic Info",
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "maxLength": 40},
+                        "description": {"type": "string", "maxLength": 150},
+                    },
+                },
+            ),
+            SlideLayoutModel(
+                id="bullet-with-icons-slide",
+                name="Bullet with Icons",
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "maxLength": 40},
+                        "description": {"type": "string", "maxLength": 150},
+                        "bulletPoints": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 3,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "title": {"type": "string", "maxLength": 60},
+                                    "description": {"type": "string", "maxLength": 100},
+                                    "icon": {
+                                        "type": "object",
+                                        "properties": {
+                                            "__icon_url__": {
+                                                "type": "string",
+                                                "maxLength": 500,
+                                            },
+                                            "__icon_query__": {
+                                                "type": "string",
+                                                "maxLength": 20,
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            ),
+        ],
+    )
+
+    with patch.object(
+        presentation_endpoint,
+        "get_layout_by_name",
+        new=AsyncMock(return_value=layout),
+    ):
+        response = _run(presentation_endpoint.strict_layout_preflight(request))
+
+    assert response.status == "pass"
+    assert response.pinned_layout_ids == ["bullet-with-icons-slide"]
+    assert response.slides[0].selected_layout_id == "bullet-with-icons-slide"
+    assert response.slides[0].compatible_layout_ids == ["bullet-with-icons-slide"]
+    preview = response.slides[0].content_preview
+    assert preview["title"] == "Executive Summary"
+    assert preview["description"] == (
+        "Date Range: Feb 15-May 16, 2026. Definition: RVR = retailer visit rate; "
+        "retailer visits divided by page loads."
+    )
+    assert [item["title"] for item in preview["bulletPoints"]] == [
+        "Question",
+        "Answer",
+        "What Follows",
+    ]
+    assert preview["bulletPoints"][1]["description"] == (
+        "Walmart leads visits at 2.3% RVR; ShopRite is the watchout at 0.3%."
+    )
+
+
 def test_strict_layout_preflight_treats_preferred_layouts_as_candidate_set():
     request = presentation_endpoint.StrictLayoutPreflightRequest(
         template="general",
