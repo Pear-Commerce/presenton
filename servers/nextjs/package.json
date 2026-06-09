@@ -51,7 +51,7 @@
     "jsonrepair": "^3.12.0",
     "lucide-react": "^0.447.0",
     "marked": "^15.0.11",
-    "mermaid": "^11.9.0",
+    "mermaid": "^11.15.0",
     "mixpanel-browser": "^2.67.0",
     "next": "16.2.6",
     "next-themes": "^0.4.6",
@@ -67,7 +67,7 @@
     "tailwind-merge": "^2.5.3",
     "tailwindcss-animate": "^1.0.7",
     "tiptap-markdown": "^0.8.10",
-    "uuid": "^11.1.0",
+    "uuid": "^14.0.0",
     "zod": "^4.0.5"
   },
   "devDependencies": {
@@ -79,7 +79,7 @@
     "@types/react-dom": "19.2.3",
     "@types/uuid": "^10.0.0",
     "@types/ws": "^8.5.13",
-    "cypress": "^14.3.3",
+    "cypress": "^15.16.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "esbuild": "0.25.8",
